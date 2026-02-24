@@ -758,24 +758,26 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const updated = await api.users.updateMe({
         username: updatedProfile.name || undefined,
-        specialty: updatedProfile.specialty || undefined,
+        specialty: updatedProfile.specialty !== undefined && updatedProfile.specialty !== null ? updatedProfile.specialty : undefined,
         hourlyRate: updatedProfile.hourlyRate !== undefined ? String(updatedProfile.hourlyRate) : undefined,
         about: updatedProfile.about || undefined,
         skills: updatedProfile.skills || undefined,
         portfolio: updatedProfile.portfolio || undefined,
         company: updatedProfile.company || undefined,
         projectInterests: updatedProfile.projectInterests || undefined,
+        avatar: updatedProfile.avatar || undefined,
       });
       const merged: FreelancerProfile = {
         ...updatedProfile,
         name: updated.username || updatedProfile.name,
-        specialty: updated.specialty || updatedProfile.specialty,
+        specialty: updated.specialty ?? updatedProfile.specialty ?? 'Generalist',
         hourlyRate: updated.hourlyRate ? parseFloat(updated.hourlyRate) : updatedProfile.hourlyRate,
         about: updated.about || updatedProfile.about,
         skills: updated.skills || updatedProfile.skills,
         portfolio: updated.portfolio || updatedProfile.portfolio,
         company: updated.company || updatedProfile.company,
         projectInterests: updated.projectInterests || updatedProfile.projectInterests,
+        avatar: updated.avatar ?? updatedProfile.avatar,
       };
       set((s) => ({
         currentUserProfile: merged,

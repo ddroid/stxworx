@@ -1,7 +1,43 @@
-
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { FreelancerProfile } from '../types';
 import { Save, User, MapPin, Briefcase, Code, Link as LinkIcon, Image as ImageIcon, Twitter, Shield, CheckCircle2, Building2, Target } from 'lucide-react';
+
+const AVATAR_MAX_SIZE = 256;
+
+function resizeImageToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const canvas = document.createElement('canvas');
+      let { width, height } = img;
+      if (width > AVATAR_MAX_SIZE || height > AVATAR_MAX_SIZE) {
+        if (width > height) {
+          height = Math.round((height * AVATAR_MAX_SIZE) / width);
+          width = AVATAR_MAX_SIZE;
+        } else {
+          width = Math.round((width * AVATAR_MAX_SIZE) / height);
+          height = AVATAR_MAX_SIZE;
+        }
+      }
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        reject(new Error('No canvas context'));
+        return;
+      }
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', 0.88));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Failed to load image'));
+    };
+    img.src = url;
+  });
+}
 
 interface EditProfileProps {
   profile: FreelancerProfile;
@@ -16,10 +52,12 @@ interface EditProfileProps {
 
 const EditProfile: React.FC<EditProfileProps> = ({ profile, onSave, onCancel, isSaving, onConnectX, isXConnected, xUsername, role = 'freelancer' }) => {
   const isClient = role === 'client';
+  const avatarInputRef = useRef<HTMLInputElement>(null);
   const [formData, setFormData] = useState<FreelancerProfile>(profile);
   const [newSkill, setNewSkill] = useState('');
   const [newPortfolioItem, setNewPortfolioItem] = useState('');
   const [newInterest, setNewInterest] = useState('');
+  const [avatarError, setAvatarError] = useState<string | null>(null);
 
   const handleAddInterest = (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,6 +80,28 @@ const EditProfile: React.FC<EditProfileProps> = ({ profile, onSave, onCancel, is
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleAvatarClick = () => {
+    setAvatarError(null);
+    avatarInputRef.current?.click();
+  };
+
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setAvatarError('Please choose an image file (e.g. JPG, PNG).');
+      return;
+    }
+    setAvatarError(null);
+    try {
+      const dataUrl = await resizeImageToDataUrl(file);
+      setFormData(prev => ({ ...prev, avatar: dataUrl }));
+    } catch {
+      setAvatarError('Could not process image. Try another file.');
+    }
+    e.target.value = '';
   };
 
   const handleAddSkill = (e: React.FormEvent) => {
@@ -133,11 +193,29 @@ const EditProfile: React.FC<EditProfileProps> = ({ profile, onSave, onCancel, is
            
            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
               <div className="col-span-1 md:col-span-2 flex flex-col sm:flex-row items-center gap-4 sm:gap-6 mb-4">
-                 <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-slate-800 border-2 border-slate-700 overflow-hidden flex items-center justify-center relative group cursor-pointer shrink-0">
-                    <img src={formData.avatar} alt="Avatar" className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity">
-                       <ImageIcon className="w-6 h-6 text-white" />
-                    </div>
+                 <input
+                   ref={avatarInputRef}
+                   type="file"
+                   accept="image/*"
+                   className="hidden"
+                   onChange={handleAvatarChange}
+                   aria-label="Upload profile picture"
+                 />
+                 <div className="flex flex-col items-center gap-1 shrink-0">
+                   <button
+                     type="button"
+                     onClick={handleAvatarClick}
+                     className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-slate-800 border-2 border-slate-700 overflow-hidden flex items-center justify-center relative group cursor-pointer focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 focus:ring-offset-[#0b0f19]"
+                     aria-label="Change profile picture"
+                   >
+                      <img src={formData.avatar} alt="Avatar" className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                         <ImageIcon className="w-6 h-6 text-white" />
+                      </div>
+                   </button>
+                   {avatarError && (
+                     <p className="text-red-400 text-xs text-center max-w-[24rem]">{avatarError}</p>
+                   )}
                  </div>
                  <div className="flex-1">
                     <label className="block text-xs font-bold uppercase text-slate-500 mb-2">Display Name</label>
@@ -169,7 +247,7 @@ const EditProfile: React.FC<EditProfileProps> = ({ profile, onSave, onCancel, is
                     <input 
                       type="text" 
                       name="specialty"
-                      value={formData.specialty}
+                      value={formData.specialty ?? ''}
                       onChange={handleInputChange}
                       placeholder="e.g. DeFi, NFTs, Gaming"
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-white focus:border-orange-500 focus:outline-none transition-colors"
@@ -183,7 +261,7 @@ const EditProfile: React.FC<EditProfileProps> = ({ profile, onSave, onCancel, is
                     <input 
                       type="text" 
                       name="specialty"
-                      value={formData.specialty}
+                      value={formData.specialty ?? ''}
                       onChange={handleInputChange}
                       placeholder="e.g. Smart Contract Developer"
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-white focus:border-orange-500 focus:outline-none transition-colors"
