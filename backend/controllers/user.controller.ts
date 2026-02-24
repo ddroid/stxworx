@@ -14,6 +14,7 @@ const updateProfileSchema = z.object({
   portfolio: z.array(z.string().url()).optional(),
   company: z.string().max(150).optional(),
   projectInterests: z.array(z.string()).optional(),
+  avatar: z.string().max(200000).optional(), // URL or data URL
 });
 
 export const userController = {
@@ -36,6 +37,7 @@ export const userController = {
           portfolio: users.portfolio,
           company: users.company,
           projectInterests: users.projectInterests,
+          avatar: users.avatar,
           createdAt: users.createdAt,
         })
         .from(users)
@@ -64,12 +66,13 @@ export const userController = {
         return res.status(400).json({ message: "Validation error", errors: result.error.errors });
       }
 
-      const { hourlyRate, ...rest } = result.data;
+      const { hourlyRate, avatar, ...rest } = result.data;
       await db
         .update(users)
         .set({
           ...rest,
           ...(hourlyRate !== undefined ? { hourlyRate } : {}),
+          ...(avatar !== undefined ? { avatar } : {}),
           updatedAt: new Date(),
         })
         .where(eq(users.id, req.user.id));
@@ -92,6 +95,7 @@ export const userController = {
         portfolio: updated.portfolio,
         company: updated.company,
         projectInterests: updated.projectInterests,
+        avatar: updated.avatar ?? undefined,
       });
     } catch (error) {
       console.error("Update profile error:", error);

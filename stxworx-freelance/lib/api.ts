@@ -42,6 +42,7 @@ export interface BackendUser {
   portfolio?: string[] | null;
   company?: string | null;
   projectInterests?: string[] | null;
+  avatar?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -246,7 +247,7 @@ export function mapBackendUserToProfile(u: BackendUser): FreelancerProfile {
     rank: 0,
     name: u.username || u.stxAddress.slice(0, 8),
     address: u.stxAddress,
-    avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.stxAddress}`,
+    avatar: u.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.stxAddress}`,
     totalEarnings: parseFloat(u.totalEarned || '0'),
     jobsCompleted: 0,
     rating: 0,
@@ -308,6 +309,7 @@ export const api = {
       portfolio?: string[];
       company?: string;
       projectInterests?: string[];
+      avatar?: string;
     }) =>
       request<BackendUser>('/users/me', {
         method: 'PATCH',

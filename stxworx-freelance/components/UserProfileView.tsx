@@ -44,7 +44,7 @@ const UserProfileView: React.FC<UserProfileViewProps> = ({
   const isFreelancer = user.role === 'freelancer';
   const isClient = user.role === 'client';
   const displayName = user.username || user.stxAddress.slice(0, 8);
-  const avatar = `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.stxAddress}`;
+  const avatar = user.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.stxAddress}`;
   const totalEarned = parseFloat(user.totalEarned || '0');
   const skills = user.skills || [];
   const portfolio = user.portfolio || [];
