@@ -5,10 +5,14 @@ A decentralized freelance escrow platform built on the Stacks blockchain, suppor
 ## 🚀 Quick Start
 
 ```bash
-# 1. Clone and install
+
+# 0. Clone and install
 git clone <your-repo-url>
 cd stx-freelance-platform
 npm install
+
+# 1. Docker compose
+docker compose up -d
 
 # 2. Setup environment
 cp .env.example .env
