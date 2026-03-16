@@ -4,6 +4,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { type Server } from "http";
 import { nanoid } from "nanoid";
+import type { InlineConfig, ConfigEnv } from "vite";
 
 // Get __dirname — works in both ESM (import.meta.url) and CJS (__dirname global)
 const _currentDir = (() => {
@@ -28,7 +29,18 @@ export function log(message: string, source = "express") {
 export async function setupVite(app: Express, server: Server) {
   // Dynamic imports - only load Vite in development mode
   const { createServer: createViteServer, createLogger } = await import("vite");
-  const viteConfig = (await import("../stxworx-freelance/vite.config")).default;
+
+  type ViteConfigExport = InlineConfig | ((env: ConfigEnv) => InlineConfig | Promise<InlineConfig>);
+  const viteConfigModule = (await import("../stxworx-freelance/vite.config")) as {
+    default: ViteConfigExport;
+  };
+  const resolvedViteConfig =
+    typeof viteConfigModule.default === "function"
+      ? await viteConfigModule.default({
+          mode: process.env.NODE_ENV || "development",
+          command: "serve",
+        })
+      : viteConfigModule.default;
   const viteLogger = createLogger();
 
   const serverOptions = {
@@ -38,7 +50,7 @@ export async function setupVite(app: Express, server: Server) {
   };
 
   const vite = await createViteServer({
-    ...viteConfig,
+    ...resolvedViteConfig,
     root: path.resolve(_currentDir, "..", "stxworx-freelance"),
     configFile: false,
     customLogger: {
@@ -58,7 +70,7 @@ export async function setupVite(app: Express, server: Server) {
 
     try {
       const clientTemplate = path.resolve(
-        __dirname,
+        _currentDir,
         "..",
         "stxworx-freelance",
         "index.html",
@@ -67,8 +79,8 @@ export async function setupVite(app: Express, server: Server) {
       // always reload the index.html file from disk incase it changes
       let template = await fs.promises.readFile(clientTemplate, "utf-8");
       template = template.replace(
-        `src="/index.tsx"`,
-        `src="/index.tsx?v=${nanoid()}"`,
+        /src="\/(?:src\/)?index\.tsx"/,
+        `src="/src/index.tsx?v=${nanoid()}"`,
       );
       const page = await vite.transformIndexHtml(url, template);
       res.status(200).set({ "Content-Type": "text/html" }).end(page);

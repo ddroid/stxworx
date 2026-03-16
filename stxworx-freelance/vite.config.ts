@@ -1,34 +1,32 @@
-import path from 'path';
-import { defineConfig, loadEnv } from 'vite';
+import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
+import path from 'path';
+import {fileURLToPath} from 'url';
+import {defineConfig, loadEnv} from 'vite';
 
-export default defineConfig(({ mode }) => {
-    const env = loadEnv(mode, '.', '');
-    return {
-      root: path.resolve(__dirname),
-      build: {
-        outDir: path.resolve(__dirname, '..', 'dist', 'public'),
-        emptyOutDir: true,
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+export default defineConfig(({mode}) => {
+  const env = loadEnv(mode, '.', '');
+  return {
+    root: __dirname,
+    plugins: [react(), tailwindcss()],
+    define: {
+      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+    },
+    resolve: {
+      alias: {
+        '@': path.resolve(__dirname, '.'),
       },
-      server: {
-        port: 3000,
-        host: '0.0.0.0',
-        proxy: {
-          '/api': {
-            target: 'http://localhost:5001',
-            changeOrigin: true,
-          },
-        },
-      },
-      plugins: [react()],
-      define: {
-        'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
-      },
-      resolve: {
-        alias: {
-          '@': path.resolve(__dirname, '.'),
-        }
-      }
-    };
+    },
+    server: {
+      host: '0.0.0.0',
+      port: 3000,
+      hmr: process.env.DISABLE_HMR !== 'true',
+    },
+    build: {
+      outDir: path.resolve(__dirname, '../dist/public'),
+      emptyOutDir: true,
+    },
+  };
 });
