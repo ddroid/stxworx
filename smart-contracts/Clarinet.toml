@@ -9,13 +9,13 @@ boot_contracts = []
 
 [contracts.escrow-contract-v1]
 path = "contracts/escrow-multi-token.clar"
-clarity_version = 4
-epoch = "latest"
+clarity_version = 2
+epoch = "2.4"
 
 [contracts.stxworx-v1]
 path = "contracts/stxworx-badge.clar"
-clarity_version = 4
-epoch = "latest"
+clarity_version = 2
+epoch = "2.4"
 
 [repl.analysis]
 passes = ["check_checker"]
