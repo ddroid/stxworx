@@ -1,6 +1,5 @@
-
-import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
+import React, { useMemo, useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Search, Bell, Globe, LayoutGrid, Users, BookOpen, Briefcase, Calendar, ShoppingBag, Newspaper,
@@ -12,12 +11,37 @@ import {
 } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 import * as Shared from '../shared';
+import {
+  formatRelativeTime,
+  formatTokenAmount,
+  getUserProfile,
+  getUserProjects,
+  getUserReviews,
+  updateMyProfile,
+} from '../lib/api';
+import type { ApiProject } from '../types/job';
+import type { ApiUserProfile, ApiUserReview } from '../types/user';
 
 export const ProfilePage = ({ userRole }: { userRole: 'client' | 'freelancer' | null }) => {
+  const { walletAddress } = Shared.useWallet();
   const tabs = ['Timeline', 'Profile', 'Bounties', 'Friends', 'NFTs'];
   const [activeTab, setActiveTab] = useState('Profile');
   const [isEditing, setIsEditing] = useState(false);
   const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [profile, setProfile] = useState<ApiUserProfile | null>(null);
+  const [projects, setProjects] = useState<ApiProject[]>([]);
+  const [reviews, setReviews] = useState<ApiUserReview[]>([]);
+  const [profileDraft, setProfileDraft] = useState({
+    username: '',
+    about: '',
+    specialty: '',
+    hourlyRate: '',
+    company: '',
+    skills: [] as string[],
+    portfolio: [] as string[],
+  });
   
   // New profile fields
   const [language, setLanguage] = useState('English');
@@ -42,16 +66,72 @@ export const ProfilePage = ({ userRole }: { userRole: 'client' | 'freelancer' | 
     setImageToEdit(null);
   };
 
+  useEffect(() => {
+    if (!walletAddress) {
+      setIsLoading(false);
+      return;
+    }
+
+    let isMounted = true;
+
+    const loadProfile = async () => {
+      setIsLoading(true);
+      try {
+        const [profileResponse, projectResponse, reviewResponse] = await Promise.all([
+          getUserProfile(walletAddress),
+          getUserProjects(walletAddress),
+          getUserReviews(walletAddress).catch(() => []),
+        ]);
+
+        if (!isMounted) {
+          return;
+        }
+
+        setProfile(profileResponse);
+        setProjects(projectResponse);
+        setReviews(reviewResponse);
+        setProfileDraft({
+          username: profileResponse.username || '',
+          about: profileResponse.about || '',
+          specialty: profileResponse.specialty || '',
+          hourlyRate: profileResponse.hourlyRate || '',
+          company: profileResponse.company || '',
+          skills: profileResponse.skills || [],
+          portfolio: profileResponse.portfolio || [],
+        });
+        if (profileResponse.avatar) {
+          setProfileImage(profileResponse.avatar);
+        }
+        setPortfolioLinks(
+          (profileResponse.portfolio || []).map((url, index) => ({
+            id: Date.now() + index,
+            title: new URL(url).hostname.replace('www.', ''),
+            url,
+            icon: <Globe size={16} />,
+          })),
+        );
+      } catch (error) {
+        console.error('Failed to load profile:', error);
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    loadProfile();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [walletAddress]);
+
   const [experiences, setExperiences] = useState([
     { id: 1, role: 'Senior Product Designer', company: 'STXWORX', period: '2021 - Present', desc: 'Leading the design system and core product features.' },
     { id: 2, role: 'UI Designer', company: 'Creative Agency', period: '2018 - 2021', desc: 'Worked on various client projects from fintech to e-commerce.' },
   ]);
 
-  const [portfolioLinks, setPortfolioLinks] = useState([
-    { id: 1, title: 'Dribbble Profile', url: 'dribbble.com/elhardin', icon: <Globe size={16} /> },
-    { id: 2, title: 'Behance Portfolio', url: 'behance.net/elodie', icon: <Globe size={16} /> },
-    { id: 3, title: 'GitHub', url: 'github.com/elhardin', icon: <Globe size={16} /> },
-  ]);
+  const [portfolioLinks, setPortfolioLinks] = useState<{ id: number; title: string; url: string; icon: React.ReactNode }[]>([]);
 
   const [timelinePosts, setTimelinePosts] = useState([
     { id: 1, text: 'Just wrapped up an amazing project! Check out the details below. #design #stxworx', image: 'https://picsum.photos/seed/feed1/800/400', likes: 24, comments: 5, time: '2 hours ago' },
@@ -89,7 +169,71 @@ export const ProfilePage = ({ userRole }: { userRole: 'client' | 'freelancer' | 
     }
   };
 
-  const isClient = userRole === 'client';
+  const resolvedRole = profile?.role || userRole;
+  const isClient = resolvedRole === 'client';
+  const displayName = profileDraft.username || profile?.username || (walletAddress ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : isClient ? 'Client Profile' : 'Freelancer Profile');
+  const displayHandle = profileDraft.username
+    ? `@${profileDraft.username.toLowerCase().replace(/\s+/g, '')}`
+    : walletAddress
+      ? `@${walletAddress.slice(0, 8).toLowerCase()}`
+      : '@stxworx';
+  const averageRating = useMemo(
+    () => (reviews.length ? (reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length).toFixed(1) : '0.0'),
+    [reviews],
+  );
+  const totalBudget = useMemo(
+    () => projects.reduce((sum, project) => sum + Number(project.budget || 0), 0),
+    [projects],
+  );
+  const recentProjects = useMemo(
+    () => [...projects].sort((left, right) => new Date(right.createdAt || 0).getTime() - new Date(left.createdAt || 0).getTime()),
+    [projects],
+  );
+  const websiteLink = portfolioLinks[0]?.url || profile?.portfolio?.[0] || '';
+  const joinedDate = profile?.createdAt
+    ? new Date(profile.createdAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+    : 'N/A';
+  const displaySkills = profileDraft.skills.length ? profileDraft.skills : profile?.skills || [];
+  const displaySpecialty = profileDraft.specialty || profile?.specialty || (isClient ? 'Decentralized Finance' : 'Freelancer');
+  const websiteHref = websiteLink ? (websiteLink.startsWith('http') ? websiteLink : `https://${websiteLink}`) : '#';
+
+  const handleSaveProfile = async () => {
+    if (!walletAddress) {
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const updated = await updateMyProfile({
+        username: profileDraft.username || undefined,
+        about: profileDraft.about || undefined,
+        specialty: profileDraft.specialty || undefined,
+        hourlyRate: profileDraft.hourlyRate || undefined,
+        company: profileDraft.company || undefined,
+        skills: profileDraft.skills.filter(Boolean),
+        portfolio: portfolioLinks.map((link) => {
+          const url = link.url.trim();
+          return url.startsWith('http') ? url : `https://${url}`;
+        }).filter(Boolean),
+        avatar: profileImage || undefined,
+      });
+      setProfile(updated);
+      setIsEditing(false);
+    } catch (error) {
+      console.error('Failed to update profile:', error);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleEditToggle = () => {
+    if (isEditing) {
+      handleSaveProfile();
+      return;
+    }
+
+    setIsEditing(true);
+  };
 
   return (
     <div className="pt-28 pb-20 px-6 md:pl-[92px]">
@@ -97,7 +241,7 @@ export const ProfilePage = ({ userRole }: { userRole: 'client' | 'freelancer' | 
         <Shared.MessageModal 
           isOpen={isMessageModalOpen} 
           onClose={() => setIsMessageModalOpen(false)} 
-          recipient={isClient ? 'Acme Corp' : 'Elodie Hardin'} 
+          recipient={displayName} 
         />
         
         {/* Image Editor Modal */}
@@ -204,16 +348,18 @@ export const ProfilePage = ({ userRole }: { userRole: 'client' | 'freelancer' | 
                     <div className="flex items-center gap-3 mb-2">
                       {isEditing ? (
                         <div className="flex flex-col gap-2">
-                          <input 
-                            type="text" 
-                            defaultValue={isClient ? 'Acme Corp' : 'Elodie Hardin'} 
+                          <input
+                            type="text"
+                            value={profileDraft.username}
+                            onChange={(e) => setProfileDraft((current) => ({ ...current, username: e.target.value }))}
                             className="text-3xl md:text-4xl font-black tracking-tighter bg-ink/5 border border-border rounded-[10px] px-3 py-1 outline-none focus:border-accent-orange"
                             placeholder="Nick Name"
                           />
-                          <input 
-                            type="text" 
-                            defaultValue={isClient ? '@acmecorp' : '@elhardin.3dart'} 
-                            className="text-sm font-bold text-muted bg-ink/5 border border-border rounded-[10px] px-3 py-1 outline-none focus:border-accent-orange"
+                          <input
+                            type="text"
+                            value={displayHandle}
+                            readOnly
+                            className="text-sm font-bold text-muted bg-ink/5 border border-border rounded-[10px] px-3 py-1 outline-none"
                             placeholder="@username"
                           />
                         </div>
@@ -221,7 +367,7 @@ export const ProfilePage = ({ userRole }: { userRole: 'client' | 'freelancer' | 
                         <div className="flex flex-col">
                           <div className="flex items-center gap-3">
                             <h1 className="text-3xl md:text-4xl font-black tracking-tighter">
-                              {isClient ? 'Acme Corp' : 'Elodie Hardin'}
+                              {displayName}
                             </h1>
                             {/* X Verified Badge */}
                             <div className="flex items-center justify-center w-5 h-5 bg-black text-white rounded-full" title="X Verified">
@@ -229,7 +375,8 @@ export const ProfilePage = ({ userRole }: { userRole: 'client' | 'freelancer' | 
                             </div>
                             <CheckCircle2 size={24} className="text-accent-blue fill-accent-blue/20" />
                           </div>
-                          <p className="text-sm font-bold text-muted mt-1">{isClient ? '@acmecorp' : '@elhardin.3dart'}</p>
+                          <p className="text-sm font-bold text-muted mt-1">{displayHandle}</p>
+                          <p className="text-xs text-muted mt-1">{displaySpecialty}</p>
                         </div>
                       )}
                     </div>
@@ -267,14 +414,14 @@ export const ProfilePage = ({ userRole }: { userRole: 'client' | 'freelancer' | 
                           </div>
                           <div className="flex items-center gap-2">
                             <LinkIcon size={14} className="shrink-0" />
-                            <input type="text" defaultValue={isClient ? 'acme.com' : 'elodie.design'} className="w-full bg-ink/5 border border-border rounded-[5px] px-2 py-1 text-xs outline-none focus:border-accent-orange" placeholder="Website" />
+                            <input type="text" value={websiteLink} readOnly className="w-full bg-ink/5 border border-border rounded-[5px] px-2 py-1 text-xs outline-none" placeholder="Website" />
                           </div>
                         </div>
                       ) : (
                         <>
                           <span className="flex items-center gap-1"><MapPin size={14} /> {city}, {country}</span>
                           <span className="flex items-center gap-1"><Globe size={14} /> {language}</span>
-                          <span className="flex items-center gap-1"><LinkIcon size={14} /> {isClient ? 'acme.com' : 'elodie.design'}</span>
+                          <span className="flex items-center gap-1"><LinkIcon size={14} /> {websiteLink || 'No website yet'}</span>
                           <div className="flex gap-3 ml-2">
                             <Twitter size={14} className="hover:text-accent-orange cursor-pointer" />
                             <Instagram size={14} className="hover:text-accent-orange cursor-pointer" />
@@ -286,8 +433,8 @@ export const ProfilePage = ({ userRole }: { userRole: 'client' | 'freelancer' | 
 
                   {/* Actions */}
                   <div className="flex gap-2 md:gap-4">
-                    <button onClick={() => setIsEditing(!isEditing)} className="btn-outline flex items-center gap-2">
-                      <Edit2 size={16} /> {isEditing ? 'Save' : 'Edit Profile'}
+                    <button onClick={handleEditToggle} className="btn-outline flex items-center gap-2">
+                      <Edit2 size={16} /> {isEditing ? (isSaving ? 'Saving...' : 'Save') : 'Edit Profile'}
                     </button>
                     {!isEditing && (
                       <>
@@ -362,11 +509,12 @@ export const ProfilePage = ({ userRole }: { userRole: 'client' | 'freelancer' | 
                   {isEditing ? (
                     <textarea 
                       className="w-full bg-ink/5 border border-border rounded-[15px] p-4 text-sm focus:ring-1 focus:ring-accent-orange min-h-[120px]"
-                      defaultValue={isClient ? "We are a forward-thinking tech company building decentralized finance solutions on Stacks." : "I'm a passionate UI/UX designer with over 8 years of experience in creating digital products that people love. My approach is centered around user needs and business goals, blending aesthetics with functionality."}
+                      value={profileDraft.about}
+                      onChange={(e) => setProfileDraft((current) => ({ ...current, about: e.target.value }))}
                     />
                   ) : (
                     <p className="text-muted leading-relaxed mb-8">
-                      {isClient ? "We are a forward-thinking tech company building decentralized finance solutions on Stacks. Our mission is to democratize access to financial tools and empower individuals globally." : "I'm a passionate UI/UX designer with over 8 years of experience in creating digital products that people love. My approach is centered around user needs and business goals, blending aesthetics with functionality. I've worked with startups and global brands to deliver high-impact design solutions."}
+                      {profile?.about || (isClient ? "This client has not added a company overview yet." : "This freelancer has not added an about section yet.")}
                     </p>
                   )}
                   
@@ -374,15 +522,25 @@ export const ProfilePage = ({ userRole }: { userRole: 'client' | 'freelancer' | 
                     <>
                       <h3 className="text-sm font-bold uppercase tracking-widest text-accent-orange mb-4">Instruments</h3>
                       <div className="flex flex-wrap gap-3">
-                        {['Figma', 'Sketch', 'Photoshop', 'After Effects', 'Webflow', 'Blender'].map(tool => (
+                        {displaySkills.map(tool => (
                           <span key={tool} className="px-4 py-2 bg-ink/5 rounded-full text-xs font-bold border border-border">{tool}</span>
                         ))}
-                        {isEditing && (
-                          <button className="px-4 py-2 bg-transparent border border-dashed border-border rounded-full text-xs font-bold text-muted hover:text-ink flex items-center gap-1">
-                            <Plus size={14} /> Add
-                          </button>
-                        )}
+                        {displaySkills.length === 0 && <span className="text-xs text-muted">No skills added yet.</span>}
                       </div>
+                      {isEditing && (
+                        <input
+                          type="text"
+                          value={profileDraft.skills.join(', ')}
+                          onChange={(e) =>
+                            setProfileDraft((current) => ({
+                              ...current,
+                              skills: e.target.value.split(',').map((value) => value.trim()).filter(Boolean),
+                            }))
+                          }
+                          className="w-full mt-4 bg-ink/5 border border-border rounded-[15px] px-4 py-3 text-sm outline-none focus:border-accent-orange"
+                          placeholder="Add skills separated by commas"
+                        />
+                      )}
                     </>
                   ) : (
                     <>
@@ -390,19 +548,19 @@ export const ProfilePage = ({ userRole }: { userRole: 'client' | 'freelancer' | 
                       <div className="grid grid-cols-2 gap-6">
                         <div>
                           <p className="text-xs text-muted mb-1">Industry</p>
-                          <p className="font-bold text-sm">Decentralized Finance (DeFi)</p>
+                          <p className="font-bold text-sm">{displaySpecialty}</p>
                         </div>
                         <div>
                           <p className="text-xs text-muted mb-1">Company Size</p>
-                          <p className="font-bold text-sm">50-200 Employees</p>
+                          <p className="font-bold text-sm">{projects.length} active listings</p>
                         </div>
                         <div>
                           <p className="text-xs text-muted mb-1">Founded</p>
-                          <p className="font-bold text-sm">2021</p>
+                          <p className="font-bold text-sm">{joinedDate}</p>
                         </div>
                         <div>
                           <p className="text-xs text-muted mb-1">Website</p>
-                          <a href="#" className="font-bold text-sm text-accent-cyan hover:underline">acmecorp.stx</a>
+                          <a href={websiteHref} className="font-bold text-sm text-accent-cyan hover:underline">{websiteLink || 'Not added yet'}</a>
                         </div>
                       </div>
                     </>
@@ -510,21 +668,19 @@ export const ProfilePage = ({ userRole }: { userRole: 'client' | 'freelancer' | 
                       <button className="text-accent-blue text-xs font-bold hover:underline">View All</button>
                     </div>
                     <div className="space-y-4">
-                      {[
-                        { title: 'DeFi Dashboard Redesign', status: 'In Progress', budget: '$5,000' },
-                        { title: 'Smart Contract Audit', status: 'Open', budget: '$2,500' },
-                      ].map((project, i) => (
-                        <div key={i} className="p-4 border border-border rounded-[15px] flex items-center justify-between hover:bg-ink/5 transition-colors cursor-pointer">
+                      {recentProjects.slice(0, 4).map((project) => (
+                        <div key={project.id} className="p-4 border border-border rounded-[15px] flex items-center justify-between hover:bg-ink/5 transition-colors cursor-pointer">
                           <div>
                             <h4 className="font-bold text-sm mb-1">{project.title}</h4>
-                            <span className={`text-[10px] font-bold uppercase tracking-widest ${project.status === 'Open' ? 'text-accent-cyan' : 'text-accent-orange'}`}>{project.status}</span>
+                            <span className={`text-[10px] font-bold uppercase tracking-widest ${project.status === 'open' ? 'text-accent-cyan' : 'text-accent-orange'}`}>{project.status}</span>
                           </div>
                           <div className="text-right">
-                            <p className="font-black text-sm">{project.budget}</p>
+                            <p className="font-black text-sm">{formatTokenAmount(project.budget)} {project.tokenType}</p>
                             <p className="text-xs text-muted">Budget</p>
                           </div>
                         </div>
                       ))}
+                      {recentProjects.length === 0 && <p className="text-sm text-muted">No projects yet.</p>}
                     </div>
                   </div>
                 )}
@@ -538,24 +694,21 @@ export const ProfilePage = ({ userRole }: { userRole: 'client' | 'freelancer' | 
                       <button className="text-accent-orange text-xs font-bold">View All</button>
                     )}
                   </div>
-                  {isClient ? (
-                    <div className="space-y-4">
-                      <div className="p-4 border border-border rounded-[15px] flex justify-between items-center">
+                  <div className="space-y-4">
+                    {recentProjects.slice(0, 4).map((project) => (
+                      <div key={project.id} className="p-4 border border-border rounded-[15px] flex justify-between items-center">
                         <div>
-                          <h4 className="font-bold text-sm mb-1">Smart Contract Developer Needed</h4>
-                          <p className="text-xs text-muted">Budget: 2,500 STX</p>
+                          <h4 className="font-bold text-sm mb-1">{project.title}</h4>
+                          <p className="text-xs text-muted">{formatRelativeTime(project.createdAt)} • {project.status}</p>
                         </div>
-                        <Link to="/dashboard" className="btn-outline py-2 px-4 text-xs">View</Link>
+                        <div className="text-right">
+                          <p className="font-black text-sm">{formatTokenAmount(project.budget)} {project.tokenType}</p>
+                          <p className="text-xs text-muted">Budget</p>
+                        </div>
                       </div>
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-2 gap-4">
-                      <img src="https://picsum.photos/seed/p1/600/400" className="rounded-[15px] aspect-video object-cover" alt="Work" referrerPolicy="no-referrer" />
-                      <img src="https://picsum.photos/seed/p2/600/400" className="rounded-[15px] aspect-video object-cover" alt="Work" referrerPolicy="no-referrer" />
-                      <img src="https://picsum.photos/seed/p3/600/400" className="rounded-[15px] aspect-video object-cover" alt="Work" referrerPolicy="no-referrer" />
-                      <img src="https://picsum.photos/seed/p4/600/400" className="rounded-[15px] aspect-video object-cover" alt="Work" referrerPolicy="no-referrer" />
-                    </div>
-                  )}
+                    ))}
+                    {recentProjects.length === 0 && <p className="text-sm text-muted">No projects available yet.</p>}
+                  </div>
                 </div>
               </>
             )}
@@ -564,7 +717,7 @@ export const ProfilePage = ({ userRole }: { userRole: 'client' | 'freelancer' | 
               <div className="space-y-6">
                 <div className="card p-4 flex gap-4 items-center">
                   <div className="w-10 h-10 rounded-[10px] bg-ink/10 shrink-0 overflow-hidden">
-                    <img src={`https://picsum.photos/seed/${isClient ? 'company' : 'avatar'}/100/100`} className="w-full h-full object-cover" alt="Avatar" referrerPolicy="no-referrer" />
+                    <img src={profileImage} className="w-full h-full object-cover" alt="Avatar" referrerPolicy="no-referrer" />
                   </div>
                   <input 
                     type="text" 
@@ -581,9 +734,9 @@ export const ProfilePage = ({ userRole }: { userRole: 'client' | 'freelancer' | 
                   <div key={post.id} className="card p-6 hover:border-accent-orange transition-colors">
                     <div className="flex items-center justify-between mb-4">
                       <div className="flex items-center gap-3">
-                        <img src={`https://picsum.photos/seed/${isClient ? 'company' : 'avatar'}/100/100`} className="w-10 h-10 rounded-[10px] object-cover" alt="Avatar" referrerPolicy="no-referrer" />
+                        <img src={profileImage} className="w-10 h-10 rounded-[10px] object-cover" alt="Avatar" referrerPolicy="no-referrer" />
                         <div>
-                          <h4 className="font-bold text-sm">{isClient ? 'Acme Corp' : 'Elodie Hardin'}</h4>
+                          <h4 className="font-bold text-sm">{displayName}</h4>
                           <p className="text-xs text-muted">{post.time}</p>
                         </div>
                       </div>
@@ -644,8 +797,8 @@ export const ProfilePage = ({ userRole }: { userRole: 'client' | 'freelancer' | 
           <div className="lg:col-span-4 space-y-6">
             <div className={`card ${isClient ? 'bg-accent-blue' : 'bg-accent-orange'} text-bg`}>
               <div className="flex items-center justify-between mb-6">
-                <p className="text-2xl font-black">{isClient ? '$12,500' : '$65 - $75'}</p>
-                <p className="text-xs font-bold opacity-60">{isClient ? 'Total Spent' : 'per hour'}</p>
+                <p className="text-2xl font-black">{isClient ? `${formatTokenAmount(totalBudget)}` : profile?.hourlyRate ? `${profile.hourlyRate}` : `${formatTokenAmount(profile?.totalEarned)}`}</p>
+                <p className="text-xs font-bold opacity-60">{isClient ? 'Total Budget' : profile?.hourlyRate ? 'per hour' : 'Total Earned'}</p>
               </div>
               <div className="space-y-4 mb-8">
                 <div className="flex justify-between text-xs font-bold border-b border-bg/10 pb-2">
@@ -653,12 +806,12 @@ export const ProfilePage = ({ userRole }: { userRole: 'client' | 'freelancer' | 
                   <span>{city}, {country}</span>
                 </div>
                 <div className="flex justify-between text-xs font-bold border-b border-bg/10 pb-2">
-                  <span className="opacity-60">{isClient ? 'Jobs Posted' : 'Type'}</span>
-                  <span>{isClient ? '15' : 'Full-Time / Freelance'}</span>
+                  <span className="opacity-60">{isClient ? 'Jobs Posted' : 'Projects'}</span>
+                  <span>{projects.length}</span>
                 </div>
                 <div className="flex justify-between text-xs font-bold border-b border-bg/10 pb-2">
-                  <span className="opacity-60">{isClient ? 'Member Since' : 'Language'}</span>
-                  <span>{isClient ? 'Jan 2025' : language}</span>
+                  <span className="opacity-60">{isClient ? 'Member Since' : 'Rating'}</span>
+                  <span>{isClient ? joinedDate : averageRating}</span>
                 </div>
               </div>
               {!isEditing && (
@@ -676,24 +829,21 @@ export const ProfilePage = ({ userRole }: { userRole: 'client' | 'freelancer' | 
 
             <div className="card">
               <h3 className="font-bold text-sm mb-6 flex items-center justify-between">
-                {isClient ? 'Recent Bounties' : 'Bounties'} <MoreHorizontal size={16} className="text-muted" />
+                Recent Reviews <MoreHorizontal size={16} className="text-muted" />
               </h3>
               <div className="space-y-4">
-                {[
-                  { name: 'Smart Contract Audit', reward: '500 STX', color: 'bg-accent-red' },
-                  { name: 'Shared.Logo Design', reward: '100 USDX', color: 'bg-accent-blue' },
-                  { name: 'Landing Page Copy', reward: '150 USDX', color: 'bg-accent-cyan' },
-                ].map(bounty => (
-                  <div key={bounty.name} className="flex items-center gap-4 group cursor-pointer">
-                    <div className={`w-10 h-10 rounded-[15px] ${bounty.color} flex items-center justify-center font-black text-white text-[10px]`}>
-                      {bounty.name.charAt(0)}
+                {reviews.slice(0, 3).map((review) => (
+                  <div key={review.id} className="flex items-start gap-4">
+                    <div className="w-10 h-10 rounded-[15px] bg-ink/10 flex items-center justify-center font-black text-[10px]">
+                      {review.rating}
                     </div>
                     <div>
-                      <p className="text-xs font-bold group-hover:text-accent-orange transition-colors">{bounty.name}</p>
-                      <p className="text-[10px] text-muted">{bounty.reward}</p>
+                      <p className="text-xs font-bold">{review.comment || 'No written feedback provided.'}</p>
+                      <p className="text-[10px] text-muted">{formatRelativeTime(review.createdAt)}</p>
                     </div>
                   </div>
                 ))}
+                {reviews.length === 0 && <p className="text-sm text-muted">No reviews yet.</p>}
               </div>
             </div>
           </div>

@@ -12,6 +12,8 @@ import {
 } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 import type { UserSession } from '@stacks/connect';
+import { createProject, createProposal, getCategories, submitMilestone } from './lib/api';
+import type { ApiCategory } from './types/job';
 
 export interface WalletContextType {
     walletAddress: string | null;
@@ -164,15 +166,43 @@ export const WorkCard = ({ title, author, image, avatar, likes, views }: WorkPro
         </div>
       </div>
     );
-export const MilestoneSubmitModal = ({ isOpen, onClose, milestone }: { isOpen: boolean, onClose: () => void, milestone?: any }) => {
+export const MilestoneSubmitModal = ({ isOpen, onClose, milestone, onSubmitted }: { isOpen: boolean, onClose: () => void, milestone?: any, onSubmitted?: () => void }) => {
       const [description, setDescription] = useState('');
+      const [deliverableUrl, setDeliverableUrl] = useState('');
+      const [isSubmitting, setIsSubmitting] = useState(false);
       const { setIsWorkSubmitted } = useWallet();
+
+      useEffect(() => {
+        if (isOpen) {
+          setDescription('');
+          setDeliverableUrl('');
+          setIsSubmitting(false);
+        }
+      }, [isOpen]);
 
       if (!isOpen) return null;
 
-      const handleSubmit = () => {
-        setIsWorkSubmitted(true);
-        onClose();
+      const handleSubmit = async () => {
+        if (!milestone?.projectId || !milestone?.milestoneNum || !deliverableUrl.trim()) {
+          return;
+        }
+
+        setIsSubmitting(true);
+        try {
+          await submitMilestone({
+            projectId: milestone.projectId,
+            milestoneNum: milestone.milestoneNum,
+            deliverableUrl: deliverableUrl.trim(),
+            description: description.trim() || undefined,
+          });
+          setIsWorkSubmitted(true);
+          onSubmitted?.();
+          onClose();
+        } catch (error) {
+          console.error('Failed to submit milestone:', error);
+        } finally {
+          setIsSubmitting(false);
+        }
       };
 
       return (
@@ -219,18 +249,20 @@ export const MilestoneSubmitModal = ({ isOpen, onClose, milestone }: { isOpen: b
                   {/* Attachment */}
                   <div>
                     <label className="block text-sm font-bold mb-2">Attachment</label>
-                    <div className="border-2 border-dashed border-border rounded-[15px] p-6 text-center hover:border-accent-orange transition-colors cursor-pointer">
-                      <Folder size={24} className="mx-auto mb-2 text-muted" />
-                      <p className="text-sm font-bold">Click to upload or drag and drop</p>
-                      <p className="text-xs text-muted">ZIP, PDF, or Link (Max 50MB)</p>
-                    </div>
+                    <input
+                      value={deliverableUrl}
+                      onChange={(e) => setDeliverableUrl(e.target.value)}
+                      className="w-full bg-transparent border border-border rounded-[15px] p-4 text-sm focus:border-accent-orange outline-none transition-colors"
+                      placeholder="Paste deliverable URL"
+                    />
                   </div>
 
                   <button 
                     onClick={handleSubmit}
+                    disabled={isSubmitting || !deliverableUrl.trim()}
                     className="w-full btn-primary py-4 font-bold text-lg justify-center"
                   >
-                    Done
+                    {isSubmitting ? 'Submitting...' : 'Done'}
                   </button>
                 </div>
               </motion.div>
@@ -392,14 +424,82 @@ export const MessageModal = ({ isOpen, onClose, recipient }: { isOpen: boolean, 
         </AnimatePresence>
       );
     };
-export const PostJobModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => void }) => {
+export const PostJobModal = ({ isOpen, onClose, onCreated }: { isOpen: boolean, onClose: () => void, onCreated?: () => void }) => {
       const [milestones, setMilestones] = useState(4);
       const [title, setTitle] = useState('');
       const [description, setDescription] = useState('');
       const [totalBudget, setTotalBudget] = useState('');
       const [currency, setCurrency] = useState('STX');
+      const [categories, setCategories] = useState<ApiCategory[]>([]);
+      const [selectedCategory, setSelectedCategory] = useState('');
+      const [selectedSubcategory, setSelectedSubcategory] = useState('');
+      const [milestoneTitles, setMilestoneTitles] = useState<string[]>(['', '', '', '']);
+      const [isSubmitting, setIsSubmitting] = useState(false);
+
+      useEffect(() => {
+        if (!isOpen) {
+          return;
+        }
+
+        getCategories()
+          .then((rows) => {
+            setCategories(rows);
+            const firstCategory = rows[0]?.name || '';
+            setSelectedCategory((current) => current || firstCategory);
+            const firstSubcategory = rows[0]?.subcategories?.[0] || '';
+            setSelectedSubcategory((current) => current || firstSubcategory);
+          })
+          .catch((error) => {
+            console.error('Failed to load categories:', error);
+          });
+      }, [isOpen]);
+
+      useEffect(() => {
+        const selected = categories.find((category) => category.name === selectedCategory);
+        if (selected && !selected.subcategories.includes(selectedSubcategory)) {
+          setSelectedSubcategory(selected.subcategories[0] || '');
+        }
+      }, [categories, selectedCategory, selectedSubcategory]);
 
       if (!isOpen) return null;
+
+      const amountPerMilestone = totalBudget ? (Number(totalBudget) / milestones).toFixed(2) : '';
+
+      const handlePostJob = async () => {
+        if (!title.trim() || !description.trim() || !totalBudget || !selectedCategory || milestoneTitles.slice(0, milestones).some((entry) => !entry.trim())) {
+          return;
+        }
+
+        setIsSubmitting(true);
+        try {
+          await createProject({
+            title: title.trim(),
+            description: description.trim(),
+            category: selectedCategory,
+            subcategory: selectedSubcategory || undefined,
+            tokenType: currency as 'STX' | 'sBTC',
+            numMilestones: milestones,
+            milestone1Title: milestoneTitles[0].trim(),
+            milestone1Description: milestoneTitles[0].trim(),
+            milestone1Amount: amountPerMilestone,
+            milestone2Title: milestones >= 2 ? milestoneTitles[1].trim() : undefined,
+            milestone2Description: milestones >= 2 ? milestoneTitles[1].trim() : undefined,
+            milestone2Amount: milestones >= 2 ? amountPerMilestone : undefined,
+            milestone3Title: milestones >= 3 ? milestoneTitles[2].trim() : undefined,
+            milestone3Description: milestones >= 3 ? milestoneTitles[2].trim() : undefined,
+            milestone3Amount: milestones >= 3 ? amountPerMilestone : undefined,
+            milestone4Title: milestones >= 4 ? milestoneTitles[3].trim() : undefined,
+            milestone4Description: milestones >= 4 ? milestoneTitles[3].trim() : undefined,
+            milestone4Amount: milestones >= 4 ? amountPerMilestone : undefined,
+          });
+          onCreated?.();
+          onClose();
+        } catch (error) {
+          console.error('Failed to create project:', error);
+        } finally {
+          setIsSubmitting(false);
+        }
+      };
 
       return (
         <AnimatePresence>
@@ -441,6 +541,37 @@ export const PostJobModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: ()
                     />
                   </div>
 
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-widest text-muted mb-2">Category</label>
+                      <select
+                        value={selectedCategory}
+                        onChange={(e) => setSelectedCategory(e.target.value)}
+                        className="w-full bg-ink/5 border border-border rounded-[15px] px-4 py-3 text-sm outline-none"
+                      >
+                        {categories.map((category) => (
+                          <option key={category.id} value={category.name}>
+                            {category.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-widest text-muted mb-2">Subcategory</label>
+                      <select
+                        value={selectedSubcategory}
+                        onChange={(e) => setSelectedSubcategory(e.target.value)}
+                        className="w-full bg-ink/5 border border-border rounded-[15px] px-4 py-3 text-sm outline-none"
+                      >
+                        {(categories.find((category) => category.name === selectedCategory)?.subcategories || []).map((subcategory) => (
+                          <option key={subcategory} value={subcategory}>
+                            {subcategory}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
                   <div>
                     <label className="block text-xs font-bold uppercase tracking-widest text-muted mb-2">Attachments</label>
                     <div className="border-2 border-dashed border-border rounded-[15px] p-6 text-center hover:border-accent-orange transition-colors cursor-pointer">
@@ -461,7 +592,7 @@ export const PostJobModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: ()
                         placeholder="e.g. 1000"
                       />
                       <div className="flex gap-2 md:w-1/2">
-                        {['STX', 'sBTC', 'USDCx'].map((c) => (
+                        {['STX', 'sBTC'].map((c) => (
                           <button
                             key={c}
                             type="button"
@@ -505,14 +636,22 @@ export const PostJobModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: ()
                         <div className="flex-1">
                           <input 
                             type="text" 
-                            placeholder={`Milestone ${i + 1} Description`}
+                            value={milestoneTitles[i] || ''}
+                            onChange={(e) =>
+                              setMilestoneTitles((current) => {
+                                const next = [...current];
+                                next[i] = e.target.value;
+                                return next;
+                              })
+                            }
+                            placeholder={`Milestone ${i + 1} Title`}
                             className="w-full bg-ink/5 border border-border rounded-[15px] px-4 py-3 text-sm focus:ring-1 focus:ring-accent-orange outline-none"
                           />
                         </div>
                         <div className="w-1/3">
                           <input 
                             type="text" 
-                            value={totalBudget ? (Number(totalBudget) / milestones).toFixed(2) : ''}
+                            value={amountPerMilestone}
                             readOnly
                             placeholder={`Amount (${currency})`}
                             className="w-full bg-ink/5 border border-border rounded-[15px] px-4 py-3 text-sm focus:ring-1 focus:ring-accent-orange outline-none opacity-70 cursor-not-allowed"
@@ -533,10 +672,11 @@ export const PostJobModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: ()
                   </div>
 
                   <button 
-                    onClick={onClose}
+                    onClick={handlePostJob}
+                    disabled={isSubmitting}
                     className="w-full btn-primary py-4 justify-center"
                   >
-                    Post Job
+                    {isSubmitting ? 'Posting...' : 'Post Job'}
                   </button>
                 </div>
               </motion.div>
@@ -550,11 +690,39 @@ export const JobApplyModal = ({ isOpen, onClose, job }: { isOpen: boolean, onClo
       const [currency, setCurrency] = useState('STX');
       const [milestones, setMilestones] = useState(2);
       const [useEscrow, setUseEscrow] = useState(true);
+      const [coverLetter, setCoverLetter] = useState('');
+      const [isSubmitting, setIsSubmitting] = useState(false);
+
+      useEffect(() => {
+        if (isOpen) {
+          setCoverLetter('');
+          setIsSubmitting(false);
+        }
+      }, [isOpen]);
 
       if (!isOpen) return null;
 
       const platformFee = amount * 0.1;
       const freelancerAmount = amount * 0.9;
+
+      const handleSubmitProposal = async () => {
+        if (!job?.id || !coverLetter.trim()) {
+          return;
+        }
+
+        setIsSubmitting(true);
+        try {
+          await createProposal({
+            projectId: job.id,
+            coverLetter: coverLetter.trim(),
+          });
+          onClose();
+        } catch (error) {
+          console.error('Failed to create proposal:', error);
+        } finally {
+          setIsSubmitting(false);
+        }
+      };
 
       return (
         <AnimatePresence>
@@ -610,6 +778,8 @@ export const JobApplyModal = ({ isOpen, onClose, job }: { isOpen: boolean, onClo
                   <div>
                     <label className="block text-sm font-bold mb-2">Proposal Description</label>
                     <textarea 
+                      value={coverLetter}
+                      onChange={(e) => setCoverLetter(e.target.value)}
                       className="w-full bg-transparent border border-border rounded-[15px] p-4 text-sm focus:border-accent-orange outline-none transition-colors min-h-[120px]"
                       placeholder="Describe why you're the best fit for this job and your approach..."
                     ></textarea>
@@ -704,7 +874,13 @@ export const JobApplyModal = ({ isOpen, onClose, job }: { isOpen: boolean, onClo
                     </div>
                   </div>
 
-                  <button className="btn-primary w-full py-4 text-lg">Submit Proposal</button>
+                  <button
+                    onClick={handleSubmitProposal}
+                    disabled={isSubmitting || !coverLetter.trim()}
+                    className="btn-primary w-full py-4 text-lg"
+                  >
+                    {isSubmitting ? 'Submitting...' : 'Submit Proposal'}
+                  </button>
                 </div>
               </motion.div>
             </div>

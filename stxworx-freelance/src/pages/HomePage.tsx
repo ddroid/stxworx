@@ -12,34 +12,40 @@ import {
 } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 import * as Shared from '../shared';
+import { getLeaderboard, getProjects, toAppJob, toDisplayName } from '../lib/api';
+import type { ApiLeaderboardEntry } from '../types/leaderboard';
+import type { AppJob } from '../types/job';
 
 export const HomePage = () => {
   const navigate = useNavigate();
+  const [featuredJobs, setFeaturedJobs] = useState<AppJob[]>([]);
+  const [topFreelancers, setTopFreelancers] = useState<ApiLeaderboardEntry[]>([]);
 
-  const featuredJobs = [
-    {
-      id: 1,
-      title: 'Smart Contract Developer Needed',
-      category: 'Development',
-      subCategory: 'Blockchain / Web3',
-      description: 'Looking for an experienced Clarity developer to audit and optimize our escrow contract.',
-      tags: ['Clarity', 'Smart Contracts', 'Security'],
-      budget: '2,500',
-      currency: 'STX',
-      color: 'text-accent-cyan'
-    },
-    {
-      id: 2,
-      title: 'UI/UX Design for DeFi Dashboard',
-      category: 'Design',
-      subCategory: 'Product Design',
-      description: 'We need a complete redesign of our decentralized exchange interface.',
-      tags: ['UI/UX', 'Figma', 'DeFi'],
-      budget: '3,000',
-      currency: 'USDCx',
-      color: 'text-accent-orange'
-    }
-  ];
+  useEffect(() => {
+    const loadHomeData = async () => {
+      try {
+        const [projects, leaderboard] = await Promise.all([
+          getProjects(),
+          getLeaderboard(),
+        ]);
+
+        setFeaturedJobs(projects.slice(0, 2).map(toAppJob));
+        setTopFreelancers(leaderboard.slice(0, 4));
+      } catch (error) {
+        console.error('Failed to load home page data:', error);
+      }
+    };
+
+    loadHomeData();
+  }, []);
+
+  const completedJobs = topFreelancers.reduce((sum, freelancer) => sum + freelancer.jobsCompleted, 0);
+  const averageRating =
+    topFreelancers.length > 0
+      ? (
+          topFreelancers.reduce((sum, freelancer) => sum + freelancer.avgRating, 0) / topFreelancers.length
+        ).toFixed(1)
+      : '0.0';
 
   return (
     <div className="pt-28 pb-20 px-6 md:pl-[92px]">
@@ -63,17 +69,17 @@ export const HomePage = () => {
                   Search Freelancers <ArrowRight size={18} />
                 </button>
                 <div className="flex -space-x-3 items-center ml-4">
-                  {[1, 2, 3, 4].map(i => (
-                    <img 
-                      key={i}
-                      src={`https://picsum.photos/seed/user${i}/100/100`} 
-                      className="w-10 h-10 rounded-[10px] border-2 border-bg object-cover"
-                      alt="User"
-                      referrerPolicy="no-referrer"
-                    />
+                  {topFreelancers.map((freelancer) => (
+                    <div
+                      key={freelancer.id}
+                      className="w-10 h-10 rounded-[10px] border-2 border-bg bg-surface flex items-center justify-center text-[10px] font-black uppercase"
+                      title={toDisplayName(freelancer)}
+                    >
+                      {toDisplayName(freelancer).slice(0, 2)}
+                    </div>
                   ))}
                   <div className="w-10 h-10 rounded-[10px] border-2 border-bg bg-surface flex items-center justify-center text-[10px] font-bold">
-                    +2k
+                    +{topFreelancers.length}
                   </div>
                 </div>
               </div>
@@ -81,14 +87,14 @@ export const HomePage = () => {
           </div>
 
           <div className="lg:col-span-4 space-y-6">
-            <Shared.StatCard value="39K+" label="Active Members in Community" color="bg-accent-orange" />
-            <Shared.StatCard value="230+" label="Groups for Designers" color="bg-accent-red" />
-            <Shared.StatCard value="50+" label="Online Courses for Creatives" color="bg-accent-blue" />
+            <Shared.StatCard value={`${topFreelancers.length}`} label="Top Freelancers Ranked" color="bg-accent-orange" />
+            <Shared.StatCard value={`${featuredJobs.length}`} label="Featured Open Jobs" color="bg-accent-red" />
+            <Shared.StatCard value={`${completedJobs}`} label="Completed Jobs by Leaders" color="bg-accent-blue" />
             <div className="p-6 rounded-[15px] bg-surface border border-border h-40 flex flex-col justify-between">
               <div className="flex items-center gap-1">
                 {[1, 2, 3, 4, 5].map(i => <Star key={i} size={16} className="text-accent-orange fill-accent-orange" />)}
               </div>
-              <p className="text-sm font-bold">4.9 Star Rating from our members worldwide</p>
+              <p className="text-sm font-bold">{averageRating} Star Average from our current top freelancers</p>
             </div>
           </div>
         </section>

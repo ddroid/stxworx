@@ -1,64 +1,172 @@
-
-import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'motion/react';
-import { 
-  Search, Bell, Globe, LayoutGrid, Users, BookOpen, Briefcase, Calendar, ShoppingBag, Newspaper,
-  ChevronRight, Star, Plus, Heart, MessageSquare, Share2, MapPin, Link as LinkIcon, Twitter, Instagram,
-  Facebook, MoreHorizontal, ArrowRight, Filter, CheckCircle2, Trophy, ChevronLeft, ChevronsRight, ChevronDown,
-  Wallet, Send, X, Settings, ShieldCheck, LogOut, Mail, Phone, MessageCircle, Sun, Moon, Maximize2, Minimize2,
-  HelpCircle, AlertTriangle, Folder, GraduationCap, Home, PenTool, Camera, Edit2, Share, Shield, Upload, FileText,
-  Download, Sparkles, Bot, ZoomIn, ZoomOut
-} from 'lucide-react';
-import { GoogleGenAI } from '@google/genai';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { LogOut, ShieldCheck, Users } from 'lucide-react';
 import * as Shared from '../shared';
+import {
+  adminLogin,
+  adminLogout,
+  formatAddress,
+  formatRelativeTime,
+  formatTokenAmount,
+  getAdminDashboard,
+  getAdminDisputes,
+  getAdminMe,
+  getAdminUsers,
+  resolveAdminDispute,
+  resetAdminDispute,
+  updateAdminUserStatus,
+  type ApiAdmin,
+  type ApiAdminDashboard,
+  type ApiDispute,
+} from '../lib/api';
+import type { ApiUserProfile } from '../types/user';
+
+type ResolutionDraft = {
+  favorFreelancer: boolean;
+  resolution: string;
+  resolutionTxId: string;
+};
 
 export const AdminDashboard = () => {
-  const { blockedWallets, blockWallet, unblockWallet } = Shared.useWallet();
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [loginMethod, setLoginMethod] = useState<'credentials' | 'wallet'>('credentials');
+  const [admin, setAdmin] = useState<ApiAdmin | null>(null);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
-  const [walletToBlock, setWalletToBlock] = useState('');
-  const [daoFee, setDaoFee] = useState(10);
-  const [daoWallet, setDaoWallet] = useState('SP3...DAO');
-  const [isSavingDao, setIsSavingDao] = useState(false);
-  const [disputes, setDisputes] = useState([
-    { id: 'DSP-1042', client: '0x123...abc', freelancer: '0x456...def', amount: '$1,200', status: 'Pending' },
-    { id: 'DSP-1043', client: '0x789...ghi', freelancer: '0xabc...jkl', amount: '$3,500', status: 'Pending' },
-  ]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [dashboard, setDashboard] = useState<ApiAdminDashboard | null>(null);
+  const [users, setUsers] = useState<ApiUserProfile[]>([]);
+  const [disputes, setDisputes] = useState<ApiDispute[]>([]);
+  const [resolutionDrafts, setResolutionDrafts] = useState<Record<number, ResolutionDraft>>({});
 
-  const handleReleaseEscrow = (id: string, to: 'client' | 'freelancer') => {
-    setDisputes(prev => prev.map(d => d.id === id ? { ...d, status: `Resolved (Paid to ${to})` } : d));
-  };
+  const loadAdminData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [{ admin: currentAdmin }, dashboardResponse, userResponse, disputeResponse] = await Promise.all([
+        getAdminMe(),
+        getAdminDashboard(),
+        getAdminUsers(),
+        getAdminDisputes(),
+      ]);
 
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (username === 'STXWORX' && password === 'ADMINMARS@110') {
-      setIsLoggedIn(true);
+      setAdmin(currentAdmin);
+      setDashboard(dashboardResponse);
+      setUsers(userResponse);
+      setDisputes(disputeResponse);
+      setResolutionDrafts(
+        Object.fromEntries(
+          disputeResponse.map((dispute) => [
+            dispute.id,
+            { favorFreelancer: true, resolution: '', resolutionTxId: '' },
+          ]),
+        ),
+      );
       setLoginError('');
-    } else {
-      setLoginError('Invalid username or password');
+    } catch {
+      setAdmin(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadAdminData();
+  }, [loadAdminData]);
+
+  const activeDisputes = useMemo(
+    () => disputes.filter((dispute) => dispute.status === 'open'),
+    [disputes],
+  );
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      const response = await adminLogin({ username, password });
+      setAdmin(response.admin);
+      setPassword('');
+      await loadAdminData();
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : 'Unable to sign in');
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const handleSaveDaoConfig = () => {
-    setIsSavingDao(true);
-    setTimeout(() => {
-      setIsSavingDao(false);
-      alert('DAO Wallet Configuration Saved successfully!');
-    }, 1000);
+  const handleLogout = async () => {
+    try {
+      await adminLogout();
+    } catch (error) {
+      console.error('Admin logout failed:', error);
+    } finally {
+      setAdmin(null);
+    }
   };
 
-  const stats = [
-    { label: 'Total Users', value: '12,450', change: '+12%', color: 'text-accent-orange' },
-    { label: 'Revenue', value: '$45,200', change: '+8%', color: 'text-accent-cyan' },
-    { label: 'Active Tasks', value: '156', change: '-2%', color: 'text-accent-red' },
-    { label: 'Support Tickets', value: '12', change: '0%', color: 'text-accent-blue' },
-  ];
+  const handleToggleUser = async (user: ApiUserProfile) => {
+    try {
+      const updated = await updateAdminUserStatus(user.id, !user.isActive);
+      setUsers((current) => current.map((entry) => (entry.id === updated.id ? updated : entry)));
+    } catch (error) {
+      console.error('Failed to update user status:', error);
+    }
+  };
 
-  if (!isLoggedIn) {
+  const updateResolutionDraft = (disputeId: number, patch: Partial<ResolutionDraft>) => {
+    setResolutionDrafts((current) => ({
+      ...current,
+      [disputeId]: {
+        favorFreelancer: true,
+        resolution: '',
+        resolutionTxId: '',
+        ...current[disputeId],
+        ...patch,
+      },
+    }));
+  };
+
+  const handleResolveDispute = async (disputeId: number, mode: 'resolve' | 'reset') => {
+    const draft = resolutionDrafts[disputeId];
+    if (!draft?.resolution.trim() || !draft?.resolutionTxId.trim()) {
+      return;
+    }
+
+    try {
+      const updated = mode === 'resolve'
+        ? await resolveAdminDispute(disputeId, {
+            resolution: draft.resolution.trim(),
+            resolutionTxId: draft.resolutionTxId.trim(),
+            favorFreelancer: draft.favorFreelancer,
+          })
+        : await resetAdminDispute(disputeId, {
+            resolution: draft.resolution.trim(),
+            resolutionTxId: draft.resolutionTxId.trim(),
+            favorFreelancer: draft.favorFreelancer,
+          });
+
+      setDisputes((current) => current.map((entry) => (entry.id === updated.id ? updated : entry)));
+    } catch (error) {
+      console.error('Failed to update dispute:', error);
+    }
+  };
+
+  const statCards = dashboard
+    ? [
+        { label: 'Total Users', value: String(dashboard.totalUsers) },
+        { label: 'Total Projects', value: String(dashboard.totalProjects) },
+        { label: 'Active Projects', value: String(dashboard.activeProjects) },
+        { label: 'Open Disputes', value: String(dashboard.openDisputes) },
+      ]
+    : [];
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-bg p-6">
+        <div className="card p-8 text-sm text-muted">Loading admin portal...</div>
+      </div>
+    );
+  }
+
+  if (!admin) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-bg p-6">
         <div className="w-full max-w-md">
@@ -69,58 +177,32 @@ export const AdminDashboard = () => {
           </div>
 
           <div className="card p-8">
-            <div className="flex gap-4 mb-8">
-              <button 
-                onClick={() => setLoginMethod('credentials')}
-                className={`flex-1 py-3 rounded-[15px] text-[10px] font-bold uppercase tracking-widest transition-all ${loginMethod === 'credentials' ? 'bg-ink text-bg' : 'bg-ink/5 text-muted hover:text-ink'}`}
-              >
-                Credentials
-              </button>
-              <button 
-                onClick={() => setLoginMethod('wallet')}
-                className={`flex-1 py-3 rounded-[15px] text-[10px] font-bold uppercase tracking-widest transition-all ${loginMethod === 'wallet' ? 'bg-ink text-bg' : 'bg-ink/5 text-muted hover:text-ink'}`}
-              >
-                Wallet
-              </button>
-            </div>
-
-            {loginMethod === 'credentials' ? (
-              <form className="space-y-6" onSubmit={handleLogin}>
-                {loginError && <p className="text-xs text-accent-red text-center font-bold">{loginError}</p>}
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-muted">Username</label>
-                  <input 
-                    type="text" 
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    className="w-full bg-ink/5 border border-border rounded-[15px] px-4 py-3 text-sm focus:ring-1 focus:ring-accent-orange" 
-                    placeholder="admin_user" 
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-muted">Password</label>
-                  <input 
-                    type="password" 
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full bg-ink/5 border border-border rounded-[15px] px-4 py-3 text-sm focus:ring-1 focus:ring-accent-orange" 
-                    placeholder="••••••••" 
-                  />
-                </div>
-                <button type="submit" className="btn-primary w-full py-4 font-bold">Sign In</button>
-              </form>
-            ) : (
-              <div className="space-y-6">
-                <p className="text-xs text-center text-muted">Connect your authorized administrator wallet to continue.</p>
-                <button 
-                  onClick={() => setIsLoggedIn(true)}
-                  className="w-full bg-ink text-bg py-4 rounded-[15px] font-bold flex items-center justify-center gap-3 hover:bg-accent-orange transition-all"
-                >
-                  <Wallet size={20} />
-                  Connect Admin Wallet
-                </button>
+            <form className="space-y-6" onSubmit={handleLogin}>
+              {loginError && <p className="text-xs text-accent-red text-center font-bold">{loginError}</p>}
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-muted">Username</label>
+                <input
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  className="w-full bg-ink/5 border border-border rounded-[15px] px-4 py-3 text-sm focus:ring-1 focus:ring-accent-orange"
+                  placeholder="admin_user"
+                />
               </div>
-            )}
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-muted">Password</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full bg-ink/5 border border-border rounded-[15px] px-4 py-3 text-sm focus:ring-1 focus:ring-accent-orange"
+                  placeholder="••••••••"
+                />
+              </div>
+              <button type="submit" disabled={submitting} className="btn-primary w-full py-4 font-bold disabled:opacity-50">
+                {submitting ? 'Signing In...' : 'Sign In'}
+              </button>
+            </form>
           </div>
         </div>
       </div>
@@ -133,23 +215,18 @@ export const AdminDashboard = () => {
         <div className="flex items-center justify-between mb-12">
           <div>
             <h1 className="text-5xl font-black tracking-tighter mb-2">Admin Dashboard</h1>
-            <p className="text-muted">Welcome back, Administrator.</p>
+            <p className="text-muted">Welcome back, {admin.username}.</p>
           </div>
-          <button onClick={() => setIsLoggedIn(false)} className="btn-outline flex items-center gap-2">
+          <button onClick={handleLogout} className="btn-outline flex items-center gap-2">
             <LogOut size={18} /> Sign Out
           </button>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
-          {stats.map(s => (
-            <div key={s.label} className="card p-6">
-              <p className="text-[10px] font-bold text-muted uppercase tracking-widest mb-4">{s.label}</p>
-              <div className="flex items-end justify-between">
-                <p className="text-3xl font-black tracking-tighter">{s.value}</p>
-                <span className={`text-[10px] font-bold ${s.change.startsWith('+') ? 'text-accent-cyan' : 'text-accent-red'}`}>
-                  {s.change}
-                </span>
-              </div>
+          {statCards.map((stat) => (
+            <div key={stat.label} className="card p-6">
+              <p className="text-[10px] font-bold text-muted uppercase tracking-widest mb-4">{stat.label}</p>
+              <p className="text-3xl font-black tracking-tighter">{stat.value}</p>
             </div>
           ))}
         </div>
@@ -157,94 +234,53 @@ export const AdminDashboard = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
           <div className="lg:col-span-2 card">
             <div className="flex items-center justify-between mb-8">
-              <h3 className="font-bold">Recent Activity</h3>
-              <button className="text-xs text-accent-orange font-bold">View Logs</button>
+              <h3 className="font-bold">Platform Overview</h3>
+              <button onClick={loadAdminData} className="text-xs text-accent-orange font-bold">Refresh</button>
             </div>
-            <div className="space-y-6">
-              {[1, 2, 3].map(i => (
-                <div key={i} className="flex items-center justify-between py-4 border-b border-border last:border-0">
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-full bg-ink/5 flex items-center justify-center">
-                      <ShieldCheck size={18} className="text-accent-cyan" />
-                    </div>
-                    <div>
-                      <p className="text-xs font-bold">System Update Successful</p>
-                      <p className="text-[10px] text-muted">Server node #04 updated to v2.4.1</p>
-                    </div>
-                  </div>
-                  <p className="text-[10px] text-muted font-bold">14:20 PM</p>
-                </div>
-              ))}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="bg-ink/5 rounded-[15px] p-5">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted mb-2">Completed Projects</p>
+                <p className="text-2xl font-black">{dashboard?.completedProjects ?? 0}</p>
+              </div>
+              <div className="bg-ink/5 rounded-[15px] p-5">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted mb-2">Funded Projects</p>
+                <p className="text-2xl font-black">{dashboard?.fundedProjects ?? 0}</p>
+              </div>
+              <div className="bg-ink/5 rounded-[15px] p-5">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted mb-2">Pending Submissions</p>
+                <p className="text-2xl font-black">{dashboard?.pendingSubmissions ?? 0}</p>
+              </div>
+              <div className="bg-ink/5 rounded-[15px] p-5">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted mb-2">Freelancers / Clients</p>
+                <p className="text-2xl font-black">{dashboard?.freelancerCount ?? 0} / {dashboard?.clientCount ?? 0}</p>
+              </div>
             </div>
           </div>
-          <div className="space-y-8">
-            <div className="card">
-              <h3 className="font-bold mb-8">User Access Control</h3>
-              <div className="mb-6">
-                <label className="block text-xs font-bold uppercase tracking-widest text-muted mb-2">Block Wallet Address</label>
-                <div className="flex gap-2">
-                  <input 
-                    type="text" 
-                    value={walletToBlock}
-                    onChange={(e) => setWalletToBlock(e.target.value)}
-                    className="w-full bg-ink/5 border border-border rounded-[10px] px-3 py-2 text-xs focus:ring-1 focus:ring-accent-red outline-none" 
-                    placeholder="0x..." 
-                  />
-                  <button 
-                    onClick={() => { if(walletToBlock) { blockWallet(walletToBlock); setWalletToBlock(''); } }}
-                    className="bg-accent-red text-white px-3 py-2 rounded-[10px] text-xs font-bold hover:bg-red-600 transition-colors"
-                  >
-                    Block
-                  </button>
-                </div>
-              </div>
-              <div>
-                <h4 className="text-xs font-bold uppercase tracking-widest text-muted mb-3">Blocked Wallets</h4>
-                {blockedWallets.length === 0 ? (
-                  <p className="text-xs text-muted italic">No wallets currently blocked.</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {blockedWallets.map(wallet => (
-                      <li key={wallet} className="flex items-center justify-between bg-ink/5 p-2 rounded-[8px] text-xs">
-                        <span className="font-mono truncate max-w-[150px]">{wallet}</span>
-                        <button onClick={() => unblockWallet(wallet)} className="text-accent-cyan hover:underline font-bold">Unblock</button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </div>
 
-            <div className="card">
-              <h3 className="font-bold mb-8">DAO Wallet Configuration</h3>
-              <div className="space-y-6">
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-widest text-muted mb-2">DAO Fee Percentage (%)</label>
-                  <input 
-                    type="number" 
-                    value={daoFee}
-                    onChange={(e) => setDaoFee(Number(e.target.value))}
-                    className="w-full bg-ink/5 border border-border rounded-[15px] px-4 py-2 text-sm focus:ring-1 focus:ring-accent-orange outline-none"
-                  />
+          <div className="card">
+            <h3 className="font-bold mb-6 flex items-center gap-2">
+              <Users size={18} />
+              User Access Control
+            </h3>
+            <div className="space-y-3 max-h-[340px] overflow-y-auto no-scrollbar">
+              {users.map((user) => (
+                <div key={user.id} className="bg-ink/5 rounded-[15px] p-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-bold">{user.username || formatAddress(user.stxAddress)}</p>
+                      <p className="text-[10px] text-muted uppercase tracking-widest">{user.role}</p>
+                    </div>
+                    <button
+                      onClick={() => handleToggleUser(user)}
+                      className={`text-xs font-bold ${user.isActive ? 'text-accent-red' : 'text-accent-cyan'}`}
+                    >
+                      {user.isActive ? 'Deactivate' : 'Activate'}
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-muted mt-2">{formatAddress(user.stxAddress)}</p>
                 </div>
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-widest text-muted mb-2">DAO Wallet Address</label>
-                  <input 
-                    type="text" 
-                    value={daoWallet}
-                    onChange={(e) => setDaoWallet(e.target.value)}
-                    className="w-full bg-ink/5 border border-border rounded-[15px] px-4 py-2 text-sm focus:ring-1 focus:ring-accent-orange outline-none"
-                    placeholder="SP..."
-                  />
-                </div>
-                <button 
-                  onClick={handleSaveDaoConfig}
-                  disabled={isSavingDao}
-                  className="btn-primary w-full py-3"
-                >
-                  {isSavingDao ? 'Saving...' : 'Save Configuration'}
-                </button>
-              </div>
+              ))}
+              {users.length === 0 && <p className="text-sm text-muted">No users found.</p>}
             </div>
           </div>
         </div>
@@ -252,47 +288,95 @@ export const AdminDashboard = () => {
         <div className="card">
           <div className="flex items-center justify-between mb-8">
             <h3 className="font-bold">Escrow Dispute Resolution</h3>
-            <span className="text-xs text-muted bg-ink/5 px-3 py-1 rounded-full font-bold">{disputes.filter(d => d.status === 'Pending').length} Active Disputes</span>
+            <span className="text-xs text-muted bg-ink/5 px-3 py-1 rounded-full font-bold">{activeDisputes.length} Active Disputes</span>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-border text-xs text-muted uppercase tracking-widest">
-                  <th className="pb-4 font-bold">Dispute ID</th>
-                  <th className="pb-4 font-bold">Client Wallet</th>
-                  <th className="pb-4 font-bold">Freelancer Wallet</th>
-                  <th className="pb-4 font-bold">Amount</th>
-                  <th className="pb-4 font-bold">Status</th>
-                  <th className="pb-4 font-bold text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {disputes.map(dispute => (
-                  <tr key={dispute.id} className="border-b border-border last:border-0 hover:bg-ink/5 transition-colors">
-                    <td className="py-4 font-bold">{dispute.id}</td>
-                    <td className="py-4 font-mono text-xs">{dispute.client}</td>
-                    <td className="py-4 font-mono text-xs">{dispute.freelancer}</td>
-                    <td className="py-4 font-black">{dispute.amount}</td>
-                    <td className="py-4">
-                      <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest ${dispute.status === 'Pending' ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-cyan/10 text-accent-cyan'}`}>
-                        {dispute.status}
-                      </span>
-                    </td>
-                    <td className="py-4 text-right">
-                      {dispute.status === 'Pending' ? (
-                        <div className="flex items-center justify-end gap-2">
-                          <button onClick={() => handleReleaseEscrow(dispute.id, 'client')} className="text-xs font-bold text-accent-red hover:underline">Refund Client</button>
-                          <span className="text-muted">|</span>
-                          <button onClick={() => handleReleaseEscrow(dispute.id, 'freelancer')} className="text-xs font-bold text-accent-cyan hover:underline">Pay Freelancer</button>
-                        </div>
-                      ) : (
-                        <span className="text-xs text-muted italic">Resolved</span>
+          <div className="space-y-6">
+            {disputes.map((dispute) => {
+              const draft = resolutionDrafts[dispute.id] || { favorFreelancer: true, resolution: '', resolutionTxId: '' };
+              return (
+                <div key={dispute.id} className="border border-border rounded-[15px] p-5">
+                  <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 mb-5">
+                    <div>
+                      <p className="font-black text-lg">Dispute #{dispute.id}</p>
+                      <p className="text-xs text-muted">Project #{dispute.projectId} • Milestone {dispute.milestoneNum} • {formatRelativeTime(dispute.createdAt)}</p>
+                    </div>
+                    <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest ${dispute.status === 'open' ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-cyan/10 text-accent-cyan'}`}>
+                      {dispute.status}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div className="space-y-3">
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-muted mb-1">Reason</p>
+                        <p className="text-sm">{dispute.reason}</p>
+                      </div>
+                      {dispute.evidenceUrl && (
+                        <a href={dispute.evidenceUrl} target="_blank" rel="noreferrer" className="text-xs text-accent-cyan hover:underline">
+                          Evidence Link
+                        </a>
                       )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                      {dispute.resolution && (
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-muted mb-1">Resolution</p>
+                          <p className="text-sm text-muted">{dispute.resolution}</p>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="space-y-3">
+                      <textarea
+                        value={draft.resolution}
+                        onChange={(e) => updateResolutionDraft(dispute.id, { resolution: e.target.value })}
+                        disabled={dispute.status !== 'open'}
+                        className="w-full bg-ink/5 border border-border rounded-[15px] p-4 text-sm min-h-[110px] outline-none disabled:opacity-50"
+                        placeholder="Enter admin resolution notes"
+                      />
+                      <input
+                        value={draft.resolutionTxId}
+                        onChange={(e) => updateResolutionDraft(dispute.id, { resolutionTxId: e.target.value })}
+                        disabled={dispute.status !== 'open'}
+                        className="w-full bg-ink/5 border border-border rounded-[15px] px-4 py-3 text-sm outline-none disabled:opacity-50"
+                        placeholder="Resolution transaction ID"
+                      />
+                      <div className="flex items-center gap-4">
+                        <button
+                          onClick={() => updateResolutionDraft(dispute.id, { favorFreelancer: false })}
+                          disabled={dispute.status !== 'open'}
+                          className={`px-4 py-2 rounded-[15px] text-xs font-bold border ${!draft.favorFreelancer ? 'bg-accent-red text-white border-transparent' : 'border-border text-muted'} disabled:opacity-50`}
+                        >
+                          Favor Client
+                        </button>
+                        <button
+                          onClick={() => updateResolutionDraft(dispute.id, { favorFreelancer: true })}
+                          disabled={dispute.status !== 'open'}
+                          className={`px-4 py-2 rounded-[15px] text-xs font-bold border ${draft.favorFreelancer ? 'bg-accent-cyan text-white border-transparent' : 'border-border text-muted'} disabled:opacity-50`}
+                        >
+                          Favor Freelancer
+                        </button>
+                      </div>
+                      <div className="flex gap-3">
+                        <button
+                          onClick={() => handleResolveDispute(dispute.id, 'resolve')}
+                          disabled={dispute.status !== 'open'}
+                          className="btn-primary py-3 px-4 text-xs disabled:opacity-50"
+                        >
+                          Resolve
+                        </button>
+                        <button
+                          onClick={() => handleResolveDispute(dispute.id, 'reset')}
+                          disabled={dispute.status !== 'open'}
+                          className="btn-outline py-3 px-4 text-xs disabled:opacity-50"
+                        >
+                          Reset Milestone
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            {disputes.length === 0 && <p className="text-sm text-muted">No disputes found.</p>}
           </div>
         </div>
       </div>

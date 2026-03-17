@@ -1,86 +1,73 @@
-
-import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'motion/react';
-import { 
-  Search, Bell, Globe, LayoutGrid, Users, BookOpen, Briefcase, Calendar, ShoppingBag, Newspaper,
-  ChevronRight, Star, Plus, Heart, MessageSquare, Share2, MapPin, Link as LinkIcon, Twitter, Instagram,
-  Facebook, MoreHorizontal, ArrowRight, Filter, CheckCircle2, Trophy, ChevronLeft, ChevronsRight, ChevronDown,
-  Wallet, Send, X, Settings, ShieldCheck, LogOut, Mail, Phone, MessageCircle, Sun, Moon, Maximize2, Minimize2,
-  HelpCircle, AlertTriangle, Folder, GraduationCap, Home, PenTool, Camera, Edit2, Share, Shield, Upload, FileText,
-  Download, Sparkles, Bot, ZoomIn, ZoomOut
-} from 'lucide-react';
-import { GoogleGenAI } from '@google/genai';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ChevronDown, Filter, Search } from 'lucide-react';
 import * as Shared from '../shared';
+import { getCategories, getProjects, toAppJob } from '../lib/api';
+import type { ApiCategory, AppJob } from '../types/job';
 
 export const ExploreJobsPage = () => {
   const { userRole } = Shared.useWallet();
   const [isApplyModalOpen, setIsApplyModalOpen] = useState(false);
-  const [selectedJob, setSelectedJob] = useState<any>(null);
+  const [selectedJob, setSelectedJob] = useState<AppJob | null>(null);
   const [selectedCurrency, setSelectedCurrency] = useState('All');
+  const [activeCategory, setActiveCategory] = useState('All');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [jobs, setJobs] = useState<AppJob[]>([]);
+  const [categories, setCategories] = useState<ApiCategory[]>([]);
 
-  const categories = [
-    { label: 'All', count: 124 },
-    { label: 'Development', count: 45 },
-    { label: 'Design', count: 32 },
-    { label: 'Marketing', count: 18 },
-    { label: 'Writing', count: 29 },
-  ];
+  useEffect(() => {
+    const loadJobsData = async () => {
+      try {
+        const [projectRows, categoryRows] = await Promise.all([
+          getProjects(),
+          getCategories(),
+        ]);
 
-  const jobs = [
-    {
-      id: 1,
-      title: 'Smart Contract Developer Needed',
-      category: 'Development',
-      subCategory: 'Blockchain / Web3',
-      description: 'Looking for an experienced Clarity developer to audit and optimize our escrow contract.',
-      fullDescription: 'We are building a decentralized marketplace on Stacks and need a senior Clarity developer to review our existing escrow smart contracts. The ideal candidate has experience with sBTC integration, SIP-010 tokens, and a strong understanding of Stacks blockchain security patterns. You will be responsible for identifying vulnerabilities, optimizing gas usage, and writing comprehensive test suites.',
-      tags: ['Clarity', 'Smart Contracts', 'Security'],
-      budget: '2,500',
-      currency: 'STX',
-      color: 'text-accent-cyan',
-      milestones: [
-        { title: 'Security Audit', description: 'Complete review of existing contracts', percentage: 30 },
-        { title: 'Optimization', description: 'Gas optimization and refactoring', percentage: 40 },
-        { title: 'Final Testing', description: 'Comprehensive test coverage', percentage: 30 }
-      ]
-    },
-    {
-      id: 2,
-      title: 'UI/UX Design for DeFi Dashboard',
-      category: 'Design',
-      subCategory: 'Product Design',
-      description: 'We need a complete redesign of our decentralized exchange interface.',
-      fullDescription: 'Our current DEX interface is functional but lacks the polish and intuitive user experience needed to attract mainstream users. We are looking for a talented UI/UX designer to create a comprehensive design system, wireframes, and high-fidelity prototypes for our new dashboard. Experience designing for Web3/DeFi applications is highly preferred. Deliverables must be in Figma.',
-      tags: ['UI/UX', 'Figma', 'DeFi'],
-      budget: '3,000',
-      currency: 'USDCx',
-      color: 'text-accent-orange',
-      milestones: [
-        { title: 'Wireframes', description: 'Initial layout and user flow', percentage: 50 },
-        { title: 'High-Fidelity Prototypes', description: 'Final designs in Figma', percentage: 50 }
-      ]
-    },
-    {
-      id: 3,
-      title: 'Technical Writer for API Documentation',
-      category: 'Writing',
-      subCategory: 'Technical Documentation',
-      description: 'Create clear, comprehensive documentation for our new developer SDK.',
-      fullDescription: 'We are launching a new SDK for developers to easily integrate Stacks authentication into their React applications. We need an experienced technical writer to create clear, concise, and engaging documentation. This includes writing quickstart guides, API references, and step-by-step tutorials. You should be comfortable reading TypeScript code and testing the SDK yourself.',
-      tags: ['Technical Writing', 'React', 'API'],
-      budget: '1,200',
-      currency: 'sBTC',
-      color: 'text-accent-pink',
-      milestones: [
-        { title: 'Drafting', description: 'Initial draft of all documentation', percentage: 40 },
-        { title: 'Review & Edits', description: 'Incorporate feedback', percentage: 30 },
-        { title: 'Final Publish', description: 'Publish to developer portal', percentage: 30 }
-      ]
-    }
-  ];
+        setJobs(projectRows.map(toAppJob));
+        setCategories(categoryRows);
+      } catch (error) {
+        console.error('Failed to load jobs page data:', error);
+      }
+    };
 
-  const handleApply = (job: any) => {
+    loadJobsData();
+  }, []);
+
+  const categoryOptions = useMemo(() => {
+    const base = [
+      {
+        label: 'All',
+        count: jobs.length,
+      },
+    ];
+
+    const derived = categories.map((category) => ({
+      label: category.name,
+      count: jobs.filter((job) => job.category === category.name).length,
+    }));
+
+    return [...base, ...derived];
+  }, [categories, jobs]);
+
+  const currencyOptions = useMemo(() => ['All', ...new Set(jobs.map((job) => job.currency))], [jobs]);
+
+  const visibleJobs = useMemo(() => {
+    const loweredSearch = searchQuery.trim().toLowerCase();
+
+    return jobs.filter((job) => {
+      const matchesCategory = activeCategory === 'All' || job.category === activeCategory;
+      const matchesCurrency = selectedCurrency === 'All' || job.currency === selectedCurrency;
+      const matchesSearch =
+        loweredSearch.length === 0 ||
+        [job.title, job.description, job.fullDescription, job.category, job.subCategory, ...job.tags]
+          .join(' ')
+          .toLowerCase()
+          .includes(loweredSearch);
+
+      return matchesCategory && matchesCurrency && matchesSearch;
+    });
+  }, [activeCategory, jobs, searchQuery, selectedCurrency]);
+
+  const handleApply = (job: AppJob) => {
     setSelectedJob(job);
     setIsApplyModalOpen(true);
   };
@@ -93,10 +80,11 @@ export const ExploreJobsPage = () => {
           
           <div className="flex flex-col md:flex-row items-center justify-between gap-6 mb-12">
             <div className="flex flex-wrap gap-2">
-              {categories.map((cat, i) => (
+              {categoryOptions.map((cat) => (
                 <button 
-                  key={i} 
-                  className={`px-4 py-2 rounded-[15px] text-[10px] font-bold uppercase tracking-widest transition-all flex items-center gap-2 ${i === 0 ? 'bg-white text-bg' : 'bg-surface text-muted hover:text-ink'}`}
+                  key={cat.label}
+                  onClick={() => setActiveCategory(cat.label)}
+                  className={`px-4 py-2 rounded-[15px] text-[10px] font-bold uppercase tracking-widest transition-all flex items-center gap-2 ${activeCategory === cat.label ? 'bg-white text-bg' : 'bg-surface text-muted hover:text-ink'}`}
                 >
                   {cat.label} <span className="opacity-40">{cat.count}</span>
                 </button>
@@ -109,15 +97,22 @@ export const ExploreJobsPage = () => {
                   onChange={(e) => setSelectedCurrency(e.target.value)}
                   className="appearance-none bg-surface border border-border rounded-[15px] pl-4 pr-10 py-2 text-sm font-bold focus:ring-1 focus:ring-accent-orange outline-none cursor-pointer text-muted hover:text-ink transition-colors"
                 >
-                  <option value="All">All Currencies</option>
-                  <option value="STX">STX</option>
-                  <option value="sBTC">sBTC</option>
-                  <option value="USDCx">USDCx</option>
+                  {currencyOptions.map((currency) => (
+                    <option key={currency} value={currency}>
+                      {currency === 'All' ? 'All Currencies' : currency}
+                    </option>
+                  ))}
                 </select>
                 <ChevronDown size={14} className="absolute right-4 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
               </div>
-              <div className="bg-surface border border-border rounded-[15px] px-3 py-2 flex items-center gap-2">
+              <div className="bg-surface border border-border rounded-[15px] px-3 py-2 flex items-center gap-2 min-w-[220px]">
                 <Search size={14} className="text-muted" />
+                <input
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search jobs"
+                  className="bg-transparent text-sm text-ink placeholder:text-muted outline-none w-full"
+                />
               </div>
               <button className="btn-outline"><Filter size={18} /> Filter</button>
             </div>
@@ -125,7 +120,7 @@ export const ExploreJobsPage = () => {
         </div>
 
         <div className="grid grid-cols-1 gap-6">
-          {jobs.filter(job => selectedCurrency === 'All' || job.currency === selectedCurrency).map((job) => (
+          {visibleJobs.map((job) => (
             <div key={job.id} className="card p-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-6 group hover:border-accent-orange transition-all cursor-pointer">
               <div>
                 <h3 className="text-xl font-black mb-2 group-hover:text-accent-orange transition-colors">{job.title}</h3>
@@ -150,6 +145,11 @@ export const ExploreJobsPage = () => {
               </div>
             </div>
           ))}
+          {visibleJobs.length === 0 && (
+            <div className="card p-6 text-sm text-muted">
+              No jobs matched your current filters.
+            </div>
+          )}
         </div>
       </div>
       <Shared.JobApplyModal isOpen={isApplyModalOpen} onClose={() => setIsApplyModalOpen(false)} job={selectedJob} />

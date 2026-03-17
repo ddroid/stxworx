@@ -1,17 +1,51 @@
-
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  Search, Bell, Globe, LayoutGrid, Users, BookOpen, Briefcase, Calendar, ShoppingBag, Newspaper,
-  ChevronRight, Star, Plus, Heart, MessageSquare, Share2, MapPin, Link as LinkIcon, Twitter, Instagram,
-  Facebook, MoreHorizontal, ArrowRight, Filter, CheckCircle2, Trophy, ChevronLeft, ChevronsRight, ChevronDown,
-  Wallet, Send, X, Settings, ShieldCheck, LogOut, Mail, Phone, MessageCircle, Sun, Moon, Maximize2, Minimize2,
-  HelpCircle, AlertTriangle, Folder, GraduationCap, Home, PenTool, Camera, Edit2, Share, Shield, Upload, FileText,
-  Download, Sparkles, Bot, ZoomIn, ZoomOut
+import {
+  AlertTriangle,
+  Bell,
+  Briefcase,
+  CheckCircle2,
+  MessageCircle,
+  Moon,
+  PenTool,
+  Search,
+  ShoppingBag,
+  Sun,
+  Wallet,
+  X,
 } from 'lucide-react';
-import { GoogleGenAI } from '@google/genai';
 import * as Shared from '../../shared';
+import {
+  formatRelativeTime,
+  getNotifications,
+  getUnreadNotificationCount,
+  getUserProfile,
+  markNotificationRead,
+  type ApiNotification,
+} from '../../lib/api';
+import type { ApiUserProfile } from '../../types/user';
+
+function getNotificationMeta(type: ApiNotification['type']) {
+  switch (type) {
+    case 'proposal_received':
+      return { icon: Briefcase, color: 'bg-accent-orange' };
+    case 'proposal_accepted':
+      return { icon: CheckCircle2, color: 'bg-accent-blue' };
+    case 'milestone_submitted':
+      return { icon: Bell, color: 'bg-accent-red' };
+    case 'milestone_approved':
+      return { icon: ShoppingBag, color: 'bg-accent-cyan' };
+    case 'milestone_rejected':
+    case 'dispute_filed':
+    case 'dispute_resolved':
+      return { icon: AlertTriangle, color: 'bg-accent-red' };
+    case 'project_completed':
+      return { icon: CheckCircle2, color: 'bg-accent-cyan' };
+    default:
+      return { icon: Bell, color: 'bg-ink/20' };
+  }
+}
 
 export const TopHeader = ({ theme, toggleTheme }: { theme: 'dark' | 'light', toggleTheme: () => void }) => {
   const { walletAddress, userRole, setUserRole, blockedWallets, connect, disconnect, isSignedIn } = Shared.useWallet();
@@ -19,6 +53,9 @@ export const TopHeader = ({ theme, toggleTheme }: { theme: 'dark' | 'light', tog
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
   const [showMessages, setShowMessages] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [notifications, setNotifications] = useState<ApiNotification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [profile, setProfile] = useState<ApiUserProfile | null>(null);
 
   const isBlocked = walletAddress && blockedWallets.includes(walletAddress);
 
@@ -27,6 +64,18 @@ export const TopHeader = ({ theme, toggleTheme }: { theme: 'dark' | 'light', tog
     if (walletAddress.length <= 10) return walletAddress;
     return `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`;
   }, [walletAddress]);
+
+  const displayName = useMemo(() => {
+    if (profile?.username) {
+      return profile.username;
+    }
+
+    if (walletAddress) {
+      return `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`;
+    }
+
+    return 'Guest';
+  }, [profile?.username, walletAddress]);
 
   const handleConnect = (role: 'client' | 'freelancer') => {
     setUserRole(role);
@@ -41,11 +90,64 @@ export const TopHeader = ({ theme, toggleTheme }: { theme: 'dark' | 'light', tog
     setShowWalletModal(false);
   };
 
-  const notifications = [
-    { id: 1, title: 'New Course Available', time: '2m ago', icon: BookOpen, color: 'bg-accent-orange' },
-    { id: 2, title: 'Valerie invited you', time: '1h ago', icon: Users, color: 'bg-accent-red' },
-    { id: 3, title: 'Payment received', time: '3h ago', icon: ShoppingBag, color: 'bg-accent-cyan' },
-  ];
+  const loadNotificationSummary = useCallback(async () => {
+    if (!isSignedIn || !walletAddress) {
+      setNotifications([]);
+      setUnreadCount(0);
+      setProfile(null);
+      return;
+    }
+
+    try {
+      const [countResponse, userProfile] = await Promise.all([
+        getUnreadNotificationCount(),
+        getUserProfile(walletAddress).catch(() => null),
+      ]);
+
+      setUnreadCount(countResponse.count);
+      setProfile(userProfile);
+    } catch (error) {
+      console.error('Failed to load notification summary:', error);
+    }
+  }, [isSignedIn, walletAddress]);
+
+  const loadNotifications = useCallback(async () => {
+    if (!isSignedIn) {
+      setNotifications([]);
+      return;
+    }
+
+    try {
+      const rows = await getNotifications();
+      setNotifications(rows);
+    } catch (error) {
+      console.error('Failed to load notifications:', error);
+    }
+  }, [isSignedIn]);
+
+  useEffect(() => {
+    loadNotificationSummary();
+  }, [loadNotificationSummary]);
+
+  useEffect(() => {
+    if (showNotifications) {
+      loadNotifications();
+    }
+  }, [loadNotifications, showNotifications]);
+
+  const handleNotificationClick = async (notification: ApiNotification) => {
+    if (!notification.isRead) {
+      try {
+        await markNotificationRead(notification.id);
+        setNotifications((current) =>
+          current.map((entry) => (entry.id === notification.id ? { ...entry, isRead: true } : entry)),
+        );
+        setUnreadCount((current) => Math.max(0, current - 1));
+      } catch (error) {
+        console.error('Failed to mark notification as read:', error);
+      }
+    }
+  };
 
   const messages = [
     { id: 1, sender: 'Alice', text: 'Hey, are you available for a new project?', time: '10m ago', unread: true },
@@ -64,16 +166,16 @@ export const TopHeader = ({ theme, toggleTheme }: { theme: 'dark' | 'light', tog
         </Link>
         <div className="flex items-center gap-4 bg-surface px-4 py-2 rounded-[15px] border border-border w-40 md:w-64 xl:w-96">
           <Search size={18} className="text-muted" />
-          <input 
-            type="text" 
-            placeholder="Search for anything..." 
+          <input
+            type="text"
+            placeholder="Search for anything..."
             className="bg-transparent border-none focus:ring-0 text-sm w-full placeholder:text-muted"
           />
         </div>
       </div>
 
       <div className="flex items-center gap-6">
-        <button 
+        <button
           onClick={toggleTheme}
           className="p-2 rounded-[15px] hover:bg-ink/5 text-muted hover:text-ink transition-all"
           title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
@@ -81,7 +183,7 @@ export const TopHeader = ({ theme, toggleTheme }: { theme: 'dark' | 'light', tog
           {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
         </button>
 
-        <button 
+        <button
           onClick={() => (isSignedIn ? handleDisconnect() : setShowWalletModal(true))}
           className={`flex items-center gap-2 px-4 py-2 rounded-[15px] text-xs font-bold transition-all ${isSignedIn ? 'bg-accent-cyan/10 text-accent-cyan border border-accent-cyan/20' : 'bg-ink text-bg hover:bg-accent-orange'} ${isBlocked ? 'opacity-70 cursor-not-allowed' : ''}`}
           disabled={isBlocked}
@@ -95,7 +197,7 @@ export const TopHeader = ({ theme, toggleTheme }: { theme: 'dark' | 'light', tog
         </button>
 
         <div className="relative">
-          <button 
+          <button
             onClick={() => { setShowMessages(!showMessages); setShowNotifications(false); }}
             className={`relative text-muted hover:text-ink transition-colors p-2 rounded-[15px] hover:bg-ink/5 ${showMessages ? 'text-ink bg-ink/5' : ''}`}
           >
@@ -116,23 +218,23 @@ export const TopHeader = ({ theme, toggleTheme }: { theme: 'dark' | 'light', tog
                   <button onClick={() => setShowMessages(false)} className="text-muted hover:text-ink"><X size={16} /></button>
                 </div>
                 <div className="max-h-96 overflow-y-auto no-scrollbar">
-                  {messages.map(m => (
-                    <div key={m.id} className={`p-4 flex items-start gap-4 hover:bg-ink/5 cursor-pointer transition-colors border-b border-border/50 last:border-0 ${m.unread ? 'bg-ink/5' : ''}`}>
-                      <div className="w-8 h-8 rounded-[10px] bg-ink/10 overflow-hidden shrink-0">
-                        <img src={`https://picsum.photos/seed/${m.sender}/100/100`} alt={m.sender} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  {messages.map((message) => (
+                    <div key={message.id} className={`p-4 flex items-start gap-4 hover:bg-ink/5 cursor-pointer transition-colors border-b border-border/50 last:border-0 ${message.unread ? 'bg-ink/5' : ''}`}>
+                      <div className="w-8 h-8 rounded-[10px] bg-ink/10 overflow-hidden shrink-0 flex items-center justify-center font-black">
+                        {message.sender.slice(0, 1)}
                       </div>
                       <div className="flex-1">
                         <div className="flex justify-between items-center mb-1">
-                          <p className={`text-xs ${m.unread ? 'font-black' : 'font-bold'}`}>{m.sender}</p>
-                          <p className="text-[10px] text-muted">{m.time}</p>
+                          <p className={`text-xs ${message.unread ? 'font-black' : 'font-bold'}`}>{message.sender}</p>
+                          <p className="text-[10px] text-muted">{message.time}</p>
                         </div>
-                        <p className={`text-[10px] truncate max-w-[200px] ${m.unread ? 'text-ink font-bold' : 'text-muted'}`}>{m.text}</p>
+                        <p className={`text-[10px] truncate max-w-[200px] ${message.unread ? 'text-ink font-bold' : 'text-muted'}`}>{message.text}</p>
                       </div>
                     </div>
                   ))}
                 </div>
-                <Link 
-                  to="/messages" 
+                <Link
+                  to="/messages"
                   onClick={() => setShowMessages(false)}
                   className="block w-full text-center p-3 text-[10px] font-bold text-muted hover:text-ink transition-colors bg-ink/5"
                 >
@@ -144,12 +246,12 @@ export const TopHeader = ({ theme, toggleTheme }: { theme: 'dark' | 'light', tog
         </div>
 
         <div className="relative">
-          <button 
+          <button
             onClick={() => { setShowNotifications(!showNotifications); setShowMessages(false); }}
             className={`relative text-muted hover:text-ink transition-colors p-2 rounded-[15px] hover:bg-ink/5 ${showNotifications ? 'text-ink bg-ink/5' : ''}`}
           >
             <Bell size={20} />
-            <span className="absolute top-1 right-1 w-2 h-2 bg-accent-red rounded-full"></span>
+            {unreadCount > 0 && <span className="absolute top-1 right-1 w-2 h-2 bg-accent-red rounded-full"></span>}
           </button>
 
           <AnimatePresence>
@@ -165,20 +267,32 @@ export const TopHeader = ({ theme, toggleTheme }: { theme: 'dark' | 'light', tog
                   <button onClick={() => setShowNotifications(false)} className="text-muted hover:text-ink"><X size={16} /></button>
                 </div>
                 <div className="max-h-96 overflow-y-auto no-scrollbar">
-                  {notifications.map(n => (
-                    <div key={n.id} className="p-4 flex items-start gap-4 hover:bg-ink/5 cursor-pointer transition-colors border-b border-border/50 last:border-0">
-                      <div className={`w-8 h-8 rounded-[15px] ${n.color} flex items-center justify-center text-bg`}>
-                        <n.icon size={14} />
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-xs font-bold mb-1">{n.title}</p>
-                        <p className="text-[10px] text-muted">{n.time}</p>
-                      </div>
-                    </div>
-                  ))}
+                  {notifications.slice(0, 5).map((notification) => {
+                    const meta = getNotificationMeta(notification.type);
+                    const Icon = meta.icon;
+
+                    return (
+                      <button
+                        key={notification.id}
+                        onClick={() => handleNotificationClick(notification)}
+                        className={`w-full text-left p-4 flex items-start gap-4 hover:bg-ink/5 cursor-pointer transition-colors border-b border-border/50 last:border-0 ${notification.isRead ? '' : 'bg-ink/5'}`}
+                      >
+                        <div className={`w-8 h-8 rounded-[15px] ${meta.color} flex items-center justify-center text-bg`}>
+                          <Icon size={14} className={meta.color === 'bg-ink/20' ? 'text-ink' : ''} />
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-xs font-bold mb-1">{notification.title}</p>
+                          <p className="text-[10px] text-muted">{formatRelativeTime(notification.createdAt)}</p>
+                        </div>
+                      </button>
+                    );
+                  })}
+                  {notifications.length === 0 && (
+                    <div className="p-4 text-[10px] text-muted">No notifications yet.</div>
+                  )}
                 </div>
-                <Link 
-                  to="/notifications" 
+                <Link
+                  to="/notifications"
                   onClick={() => setShowNotifications(false)}
                   className="block w-full text-center p-3 text-[10px] font-bold text-muted hover:text-ink transition-colors bg-ink/5"
                 >
@@ -192,15 +306,21 @@ export const TopHeader = ({ theme, toggleTheme }: { theme: 'dark' | 'light', tog
         <div className="h-8 w-[1px] bg-border"></div>
         <Link to="/profile" className="flex items-center gap-3 group">
           <div className="text-right hidden sm:block">
-            <p className="text-sm font-bold group-hover:text-accent-orange transition-colors">Elodie Hardin</p>
-            <p className="text-[10px] text-muted">Pro Member</p>
+            <p className="text-sm font-bold group-hover:text-accent-orange transition-colors">{displayName}</p>
+            <p className="text-[10px] text-muted">{userRole ? `${userRole[0].toUpperCase()}${userRole.slice(1)}` : 'Member'}</p>
           </div>
-          <img 
-            src="https://picsum.photos/seed/elodie/100/100" 
-            alt="Profile" 
-            className="w-10 h-10 rounded-[10px] object-cover border-2 border-border group-hover:border-accent-orange transition-all"
-            referrerPolicy="no-referrer"
-          />
+          {profile?.avatar ? (
+            <img
+              src={profile.avatar}
+              alt="Profile"
+              className="w-10 h-10 rounded-[10px] object-cover border-2 border-border group-hover:border-accent-orange transition-all"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <div className="w-10 h-10 rounded-[10px] border-2 border-border group-hover:border-accent-orange transition-all bg-ink/10 flex items-center justify-center font-black">
+              {displayName.slice(0, 1).toUpperCase()}
+            </div>
+          )}
         </Link>
       </div>
     </header>
@@ -214,7 +334,7 @@ export const TopHeader = ({ theme, toggleTheme }: { theme: 'dark' | 'light', tog
             exit={{ opacity: 0, scale: 0.95 }}
             className="bg-surface border border-border rounded-[15px] p-8 max-w-sm w-full shadow-2xl relative"
           >
-            <button 
+            <button
               onClick={() => {
                 setShowWalletModal(false);
                 setSelectedProvider(null);
@@ -231,24 +351,24 @@ export const TopHeader = ({ theme, toggleTheme }: { theme: 'dark' | 'light', tog
                 This wallet has been blocked by the administrator.
               </div>
             )}
-            
+
             {!selectedProvider ? (
               <div className="space-y-4">
-                <button 
+                <button
                   onClick={() => setSelectedProvider('xverse')}
                   className="w-full py-4 rounded-[15px] border border-border hover:border-accent-orange hover:bg-accent-orange/5 transition-all font-bold flex items-center justify-center gap-3"
                 >
                   <div className="w-6 h-6 bg-ink rounded-full flex items-center justify-center text-bg text-xs">X</div>
                   Xverse Wallet
                 </button>
-                <button 
+                <button
                   onClick={() => setSelectedProvider('leather')}
                   className="w-full py-4 rounded-[15px] border border-border hover:border-accent-cyan hover:bg-accent-cyan/5 transition-all font-bold flex items-center justify-center gap-3"
                 >
                   <div className="w-6 h-6 bg-ink rounded-full flex items-center justify-center text-bg text-xs">L</div>
                   Leather Wallet
                 </button>
-                <button 
+                <button
                   onClick={() => setSelectedProvider('other')}
                   className="w-full py-4 rounded-[15px] border border-border hover:border-blue-500 hover:bg-blue-500/5 transition-all font-bold flex items-center justify-center gap-3"
                 >
@@ -258,21 +378,21 @@ export const TopHeader = ({ theme, toggleTheme }: { theme: 'dark' | 'light', tog
               </div>
             ) : (
               <div className="space-y-4">
-                <button 
+                <button
                   onClick={() => handleConnect('client')}
                   className="w-full py-4 rounded-[15px] border border-border hover:border-accent-cyan hover:bg-accent-cyan/5 transition-all font-bold flex flex-col items-center gap-2"
                 >
                   <span className="text-accent-cyan"><Briefcase size={24} /></span>
                   Connect as Client
                 </button>
-                <button 
+                <button
                   onClick={() => handleConnect('freelancer')}
                   className="w-full py-4 rounded-[15px] border border-border hover:border-accent-orange hover:bg-accent-orange/5 transition-all font-bold flex flex-col items-center gap-2"
                 >
                   <span className="text-accent-orange"><PenTool size={24} /></span>
                   Connect as Freelancer
                 </button>
-                <button 
+                <button
                   onClick={() => setSelectedProvider(null)}
                   className="w-full py-2 text-xs font-bold text-muted hover:text-ink transition-colors mt-2"
                 >
