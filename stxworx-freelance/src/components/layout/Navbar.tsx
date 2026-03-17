@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Search, Bell, Globe, LayoutGrid, Users, BookOpen, Briefcase, Calendar, ShoppingBag, Newspaper,
@@ -14,25 +14,31 @@ import { GoogleGenAI } from '@google/genai';
 import * as Shared from '../../shared';
 
 export const TopHeader = ({ theme, toggleTheme }: { theme: 'dark' | 'light', toggleTheme: () => void }) => {
-  const { walletAddress, setWalletAddress, userRole, setUserRole, blockedWallets } = Shared.useWallet();
+  const { walletAddress, userRole, setUserRole, blockedWallets, connect, disconnect, isSignedIn } = Shared.useWallet();
   const [showWalletModal, setShowWalletModal] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
   const [showMessages, setShowMessages] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
-  const location = useLocation();
 
   const isBlocked = walletAddress && blockedWallets.includes(walletAddress);
 
+  const displayWalletAddress = useMemo(() => {
+    if (!walletAddress) return 'Connect Wallet';
+    if (walletAddress.length <= 10) return walletAddress;
+    return `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`;
+  }, [walletAddress]);
+
   const handleConnect = (role: 'client' | 'freelancer') => {
-    setWalletAddress('0x71C...4f2'); // Mock wallet connection
     setUserRole(role);
+    connect(role);
     setShowWalletModal(false);
     setSelectedProvider(null);
   };
 
   const handleDisconnect = () => {
-    setWalletAddress(null);
-    setUserRole(null);
+    disconnect();
+    setSelectedProvider(null);
+    setShowWalletModal(false);
   };
 
   const notifications = [
@@ -76,15 +82,16 @@ export const TopHeader = ({ theme, toggleTheme }: { theme: 'dark' | 'light', tog
         </button>
 
         <button 
-          onClick={() => userRole ? handleDisconnect() : setShowWalletModal(true)}
-          className={`flex items-center gap-2 px-4 py-2 rounded-[15px] text-xs font-bold transition-all ${userRole ? 'bg-accent-cyan/10 text-accent-cyan border border-accent-cyan/20' : 'bg-ink text-bg hover:bg-accent-orange'}`}
+          onClick={() => (isSignedIn ? handleDisconnect() : setShowWalletModal(true))}
+          className={`flex items-center gap-2 px-4 py-2 rounded-[15px] text-xs font-bold transition-all ${isSignedIn ? 'bg-accent-cyan/10 text-accent-cyan border border-accent-cyan/20' : 'bg-ink text-bg hover:bg-accent-orange'} ${isBlocked ? 'opacity-70 cursor-not-allowed' : ''}`}
+          disabled={isBlocked}
         >
-          {userRole ? (
+          {isSignedIn ? (
             <Wallet size={16} />
           ) : (
             <div className="w-2 h-2 rounded-full bg-[#FF5E00] shadow-[0_0_8px_#FF5E00]" />
           )}
-          {userRole ? walletAddress : 'Connect Wallet'}
+          {isSignedIn ? displayWalletAddress : 'Connect Wallet'}
         </button>
 
         <div className="relative">

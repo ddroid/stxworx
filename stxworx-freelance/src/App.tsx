@@ -73,6 +73,7 @@ import { GoogleGenAI } from '@google/genai';
 
 import { createContext, useContext } from 'react';
 import * as Shared from "./shared";
+import { WalletProvider } from "./components/wallet/WalletProvider";
 import { HomePage } from "./pages/HomePage";
 import { ExploreJobsPage } from "./pages/ExploreJobsPage";
 import { FreelancersPage } from "./pages/ExploreFreelancersPage";
@@ -414,7 +415,19 @@ export default function App() {
   }
 
   return (
-    <Shared.WalletContext.Provider value={{ walletAddress, setWalletAddress, userRole, setUserRole, blockedWallets, blockWallet, unblockWallet, isWorkSubmitted, setIsWorkSubmitted }}>
+    <WalletProvider
+      value={{
+        walletAddress,
+        setWalletAddress,
+        userRole,
+        setUserRole,
+        blockedWallets,
+        blockWallet,
+        unblockWallet,
+        isWorkSubmitted,
+        setIsWorkSubmitted,
+      }}
+    >
       <Router>
         <Shared.CustomCursor />
         <div className="min-h-screen bg-bg text-ink selection:bg-accent-orange selection:text-bg">
@@ -655,6 +668,6 @@ export default function App() {
           </div>
         </div>
       </Router>
-    </Shared.WalletContext.Provider>
+    </WalletProvider>
   );
 }

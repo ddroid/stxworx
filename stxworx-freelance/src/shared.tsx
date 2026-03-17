@@ -11,6 +11,7 @@ import {
   Download, Sparkles, Bot, ZoomIn, ZoomOut
 } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
+import type { UserSession } from '@stacks/connect';
 
 export interface WalletContextType {
     walletAddress: string | null;
@@ -22,6 +23,11 @@ export interface WalletContextType {
     unblockWallet: (address: string) => void;
     isWorkSubmitted: boolean;
     setIsWorkSubmitted: (submitted: boolean) => void;
+    connect: (role?: 'client' | 'freelancer') => void;
+    disconnect: () => void;
+    isSignedIn: boolean;
+    userSession: UserSession | null;
+    userData: any;
 }
 
 export const WalletContext = createContext<WalletContextType>({
@@ -34,6 +40,11 @@ export const WalletContext = createContext<WalletContextType>({
       unblockWallet: () => {},
       isWorkSubmitted: false,
       setIsWorkSubmitted: () => {},
+      connect: () => {},
+      disconnect: () => {},
+      isSignedIn: false,
+      userSession: null,
+      userData: null,
     });
 export const useWallet = () => useContext(WalletContext);
 
