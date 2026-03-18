@@ -12,12 +12,26 @@ import {
 import { GoogleGenAI } from '@google/genai';
 import * as Shared from '../shared';
 import {
+  acceptConnection,
+  createSocialPost,
+  declineConnection,
   formatRelativeTime,
   formatTokenAmount,
+  getConnectionSuggestions,
+  getConnections,
+  getMyBountyDashboard,
+  getSocialPosts,
   getUserProfile,
+  getUserNfts,
   getUserProjects,
   getUserReviews,
+  requestConnection,
+  toggleSocialPostLike,
   updateMyProfile,
+  type ApiBountyDashboard,
+  type ApiConnection,
+  type ApiReputationNft,
+  type ApiSocialPost,
 } from '../lib/api';
 import type { ApiProject } from '../types/job';
 import type { ApiUserProfile, ApiUserReview } from '../types/user';
@@ -33,6 +47,11 @@ export const ProfilePage = ({ userRole }: { userRole: 'client' | 'freelancer' | 
   const [profile, setProfile] = useState<ApiUserProfile | null>(null);
   const [projects, setProjects] = useState<ApiProject[]>([]);
   const [reviews, setReviews] = useState<ApiUserReview[]>([]);
+  const [timelinePosts, setTimelinePosts] = useState<ApiSocialPost[]>([]);
+  const [connections, setConnections] = useState<ApiConnection[]>([]);
+  const [connectionSuggestions, setConnectionSuggestions] = useState<Array<Pick<ApiUserProfile, 'id' | 'stxAddress' | 'username' | 'role' | 'isActive' | 'specialty' | 'avatar'>>>([]);
+  const [bountyDashboard, setBountyDashboard] = useState<ApiBountyDashboard | null>(null);
+  const [nfts, setNfts] = useState<ApiReputationNft[]>([]);
   const [profileDraft, setProfileDraft] = useState({
     username: '',
     about: '',
@@ -77,10 +96,15 @@ export const ProfilePage = ({ userRole }: { userRole: 'client' | 'freelancer' | 
     const loadProfile = async () => {
       setIsLoading(true);
       try {
-        const [profileResponse, projectResponse, reviewResponse] = await Promise.all([
+        const [profileResponse, projectResponse, reviewResponse, socialResponse, connectionResponse, suggestionResponse, bountyResponse, nftResponse] = await Promise.all([
           getUserProfile(walletAddress),
           getUserProjects(walletAddress),
           getUserReviews(walletAddress).catch(() => []),
+          getSocialPosts(walletAddress).catch(() => []),
+          getConnections().catch(() => []),
+          getConnectionSuggestions().catch(() => []),
+          getMyBountyDashboard().catch(() => null),
+          getUserNfts(walletAddress).catch(() => []),
         ]);
 
         if (!isMounted) {
@@ -90,6 +114,11 @@ export const ProfilePage = ({ userRole }: { userRole: 'client' | 'freelancer' | 
         setProfile(profileResponse);
         setProjects(projectResponse);
         setReviews(reviewResponse);
+        setTimelinePosts(socialResponse);
+        setConnections(connectionResponse);
+        setConnectionSuggestions(suggestionResponse);
+        setBountyDashboard(bountyResponse);
+        setNfts(nftResponse);
         setProfileDraft({
           username: profileResponse.username || '',
           about: profileResponse.about || '',
@@ -132,11 +161,6 @@ export const ProfilePage = ({ userRole }: { userRole: 'client' | 'freelancer' | 
   ]);
 
   const [portfolioLinks, setPortfolioLinks] = useState<{ id: number; title: string; url: string; icon: React.ReactNode }[]>([]);
-
-  const [timelinePosts, setTimelinePosts] = useState([
-    { id: 1, text: 'Just wrapped up an amazing project! Check out the details below. #design #stxworx', image: 'https://picsum.photos/seed/feed1/800/400', likes: 24, comments: 5, time: '2 hours ago' },
-    { id: 2, text: 'Excited to start a new smart contract audit today! 🚀', image: 'https://picsum.photos/seed/feed2/800/400', likes: 12, comments: 2, time: '1 day ago' }
-  ]);
   const [newPostText, setNewPostText] = useState('');
 
   const handleAddExperience = () => {
@@ -155,17 +179,69 @@ export const ProfilePage = ({ userRole }: { userRole: 'client' | 'freelancer' | 
     setPortfolioLinks(portfolioLinks.filter(link => link.id !== id));
   };
 
-  const handlePostTimeline = () => {
-    if (newPostText.trim()) {
-      setTimelinePosts([{
-        id: Date.now(),
-        text: newPostText,
-        image: '',
-        likes: 0,
-        comments: 0,
-        time: 'Just now'
-      }, ...timelinePosts]);
+  const handlePostTimeline = async () => {
+    if (!newPostText.trim()) {
+      return;
+    }
+
+    try {
+      const created = await createSocialPost({ content: newPostText.trim() });
+      setTimelinePosts((current) => [
+        {
+          ...created,
+          likesCount: 0,
+          commentsCount: 0,
+          likedByViewer: false,
+        },
+        ...current,
+      ]);
       setNewPostText('');
+    } catch (error) {
+      console.error('Failed to create timeline post:', error);
+    }
+  };
+
+  const handleToggleTimelineLike = async (postId: number) => {
+    try {
+      const response = await toggleSocialPostLike(postId);
+      setTimelinePosts((current) =>
+        current.map((post) =>
+          post.id === postId
+            ? {
+                ...post,
+                likesCount: response.likesCount,
+                likedByViewer: response.likedByViewer,
+              }
+            : post,
+        ),
+      );
+    } catch (error) {
+      console.error('Failed to toggle post like:', error);
+    }
+  };
+
+  const handleRequestConnection = async (userId: number) => {
+    try {
+      await requestConnection(userId);
+      setConnectionSuggestions((current) => current.filter((entry) => entry.id !== userId));
+      const refreshed = await getConnections();
+      setConnections(refreshed);
+    } catch (error) {
+      console.error('Failed to request connection:', error);
+    }
+  };
+
+  const handleRespondToConnection = async (connectionId: number, action: 'accept' | 'decline') => {
+    try {
+      const updated = action === 'accept'
+        ? await acceptConnection(connectionId)
+        : await declineConnection(connectionId);
+
+      setConnections((current) =>
+        current.map((connection) => (connection.id === updated.id ? { ...connection, status: updated.status } : connection)),
+      );
+    } catch (error) {
+      console.error('Failed to update connection:', error);
     }
   };
 
@@ -196,6 +272,9 @@ export const ProfilePage = ({ userRole }: { userRole: 'client' | 'freelancer' | 
   const displaySkills = profileDraft.skills.length ? profileDraft.skills : profile?.skills || [];
   const displaySpecialty = profileDraft.specialty || profile?.specialty || (isClient ? 'Decentralized Finance' : 'Freelancer');
   const websiteHref = websiteLink ? (websiteLink.startsWith('http') ? websiteLink : `https://${websiteLink}`) : '#';
+  const acceptedConnections = connections.filter((connection) => connection.status === 'accepted');
+  const incomingConnectionRequests = connections.filter((connection) => connection.status === 'pending' && connection.direction === 'incoming');
+  const outgoingConnectionRequests = connections.filter((connection) => connection.status === 'pending' && connection.direction === 'outgoing');
 
   const handleSaveProfile = async () => {
     if (!walletAddress) {
@@ -737,58 +816,159 @@ export const ProfilePage = ({ userRole }: { userRole: 'client' | 'freelancer' | 
                         <img src={profileImage} className="w-10 h-10 rounded-[10px] object-cover" alt="Avatar" referrerPolicy="no-referrer" />
                         <div>
                           <h4 className="font-bold text-sm">{displayName}</h4>
-                          <p className="text-xs text-muted">{post.time}</p>
+                          <p className="text-xs text-muted">{formatRelativeTime(post.createdAt)}</p>
                         </div>
                       </div>
                       <button className="text-muted hover:text-ink"><MoreHorizontal size={16} /></button>
                     </div>
                     <Link to={`/post/${post.id}`} className="block group">
-                      <p className="text-sm mb-4 group-hover:text-accent-orange transition-colors">{post.text}</p>
-                      {post.image && (
-                        <img src={post.image} className="w-full rounded-[15px] mb-4 object-cover max-h-64" alt="Post content" referrerPolicy="no-referrer" />
+                      <p className="text-sm mb-4 group-hover:text-accent-orange transition-colors">{post.content}</p>
+                      {post.imageUrl && (
+                        <img src={post.imageUrl} className="w-full rounded-[15px] mb-4 object-cover max-h-64" alt="Post content" referrerPolicy="no-referrer" />
                       )}
                     </Link>
                     <div className="flex items-center gap-6 text-muted border-t border-border pt-4">
-                      <button className="flex items-center gap-2 text-xs font-bold hover:text-accent-red transition-colors"><Heart size={16} /> {post.likes}</button>
-                      <Link to={`/post/${post.id}`} className="flex items-center gap-2 text-xs font-bold hover:text-accent-blue transition-colors"><MessageCircle size={16} /> {post.comments}</Link>
+                      <button onClick={() => handleToggleTimelineLike(post.id)} className={`flex items-center gap-2 text-xs font-bold transition-colors ${post.likedByViewer ? 'text-accent-red' : 'hover:text-accent-red'}`}><Heart size={16} /> {post.likesCount}</button>
+                      <Link to={`/post/${post.id}`} className="flex items-center gap-2 text-xs font-bold hover:text-accent-blue transition-colors"><MessageCircle size={16} /> {post.commentsCount}</Link>
                       <button className="flex items-center gap-2 text-xs font-bold hover:text-accent-orange transition-colors ml-auto"><Share2 size={16} /> Share</button>
                     </div>
                   </div>
                 ))}
+                {timelinePosts.length === 0 && (
+                  <div className="card p-6 text-sm text-muted">No timeline posts yet.</div>
+                )}
               </div>
             )}
 
             {activeTab === 'NFTs' && (
               <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
-                {[
-                  { id: 1, title: 'Verified Member', image: '/Verify NFT.png', acquired: true, date: 'Jan 2025' },
-                  { id: 2, title: 'Bronze Freelancer', image: '/Bronze NFT.png', acquired: true, date: 'Mar 2025' },
-                  { id: 3, title: 'Silver Freelancer', image: '/Silver NFT.png', acquired: false, date: 'Unacquired' },
-                  { id: 4, title: 'Gold Freelancer', image: '/Gold NFT.png', acquired: false, date: 'Unacquired' },
-                  { id: 5, title: 'Platinum Freelancer', image: '/Platinum NFT.png', acquired: false, date: 'Unacquired' },
-                ].map((nft) => (
-                  <div key={nft.id} className={`card p-4 text-center group ${!nft.acquired ? 'opacity-60' : ''}`}>
-                    <div className="aspect-square rounded-[15px] overflow-hidden mb-4 relative bg-ink/5">
-                      <img 
-                        src={nft.image} 
-                        className={`w-full h-full object-cover transition-transform duration-500 ${nft.acquired ? 'group-hover:scale-110' : 'grayscale'}`} 
-                        alt={nft.title} 
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
+                {nfts.map((nft) => (
+                  <div key={nft.id} className="card p-4 text-center group">
+                    <div className="aspect-square rounded-[15px] overflow-hidden mb-4 relative bg-gradient-to-br from-accent-orange/20 via-accent-cyan/10 to-accent-pink/10 flex items-center justify-center">
+                      <div className="w-24 h-24 rounded-full bg-ink text-bg flex items-center justify-center text-3xl font-black uppercase">
+                        {nft.name.slice(0, 1)}
+                      </div>
                       <div className="absolute bottom-3 left-3 text-left">
-                        <p className="text-xs font-black text-white">{nft.title}</p>
-                        <p className="text-[10px] text-white/80">{nft.date}</p>
+                        <p className="text-xs font-black">{nft.name}</p>
+                        <p className="text-[10px] text-muted">{formatRelativeTime(nft.createdAt)}</p>
                       </div>
                     </div>
-                    <h4 className="font-bold text-sm">{nft.title}</h4>
+                    <h4 className="font-bold text-sm">{nft.name}</h4>
+                    <p className="text-[10px] text-muted uppercase tracking-widest mt-1">{nft.nftType.replace(/_/g, ' ')}</p>
+                    <p className={`text-[10px] font-bold mt-2 ${nft.minted ? 'text-accent-cyan' : 'text-muted'}`}>{nft.minted ? 'Mint confirmed' : 'Awaiting mint confirmation'}</p>
                   </div>
                 ))}
+                {nfts.length === 0 && (
+                  <div className="card p-6 text-sm text-muted col-span-2 md:col-span-3">No reputation NFTs awarded yet.</div>
+                )}
               </div>
             )}
 
-            {(activeTab === 'Bounties' || activeTab === 'Friends' || activeTab === 'More') && (
-              <div className="card p-12 text-center text-muted">
-                <p>{activeTab} content will be displayed here.</p>
+            {activeTab === 'Bounties' && (
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="card p-6">
+                    <h3 className="font-bold text-lg mb-4">Posted Bounties</h3>
+                    <div className="space-y-4">
+                      {bountyDashboard?.posted.map((bounty) => (
+                        <div key={bounty.id} className="border border-border rounded-[15px] p-4">
+                          <div className="flex items-center justify-between gap-4 mb-2">
+                            <h4 className="font-bold text-sm">{bounty.title}</h4>
+                            <span className="text-[10px] uppercase tracking-widest font-bold text-accent-orange">{bounty.status}</span>
+                          </div>
+                          <p className="text-xs text-muted mb-2">{bounty.reward}</p>
+                          <p className="text-[10px] text-muted">{bounty.submissionCount} submissions</p>
+                        </div>
+                      ))}
+                      {(!bountyDashboard || bountyDashboard.posted.length === 0) && <p className="text-sm text-muted">You have not posted any bounties yet.</p>}
+                    </div>
+                  </div>
+                  <div className="card p-6">
+                    <h3 className="font-bold text-lg mb-4">Your Participations</h3>
+                    <div className="space-y-4">
+                      {bountyDashboard?.participations.map((participation) => (
+                        <div key={participation.id} className="border border-border rounded-[15px] p-4">
+                          <div className="flex items-center justify-between gap-4 mb-2">
+                            <h4 className="font-bold text-sm">{participation.bountyTitle || `Bounty #${participation.bountyId}`}</h4>
+                            <span className="text-[10px] uppercase tracking-widest font-bold text-accent-cyan">{participation.status}</span>
+                          </div>
+                          <p className="text-xs text-muted">{participation.reward || 'Reward pending'}</p>
+                        </div>
+                      ))}
+                      {(!bountyDashboard || bountyDashboard.participations.length === 0) && <p className="text-sm text-muted">You have not joined any bounties yet.</p>}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'Friends' && (
+              <div className="space-y-6">
+                <div className="card p-6">
+                  <h3 className="font-bold text-lg mb-4">Connections</h3>
+                  <div className="space-y-4">
+                    {acceptedConnections.map((connection) => (
+                      <div key={connection.id} className="border border-border rounded-[15px] p-4 flex items-center justify-between gap-4">
+                        <div>
+                          <p className="font-bold text-sm">{connection.otherUser?.username || connection.otherUser?.stxAddress || 'Connection'}</p>
+                          <p className="text-[10px] text-muted uppercase tracking-widest">{connection.otherUser?.role || 'User'}</p>
+                        </div>
+                        <span className="text-xs font-bold text-accent-cyan">Connected</span>
+                      </div>
+                    ))}
+                    {acceptedConnections.length === 0 && <p className="text-sm text-muted">No accepted connections yet.</p>}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="card p-6">
+                    <h3 className="font-bold text-lg mb-4">Incoming Requests</h3>
+                    <div className="space-y-4">
+                      {incomingConnectionRequests.map((connection) => (
+                        <div key={connection.id} className="border border-border rounded-[15px] p-4">
+                          <p className="font-bold text-sm mb-1">{connection.otherUser?.username || connection.otherUser?.stxAddress || 'User'}</p>
+                          <div className="flex gap-2 mt-3">
+                            <button onClick={() => handleRespondToConnection(connection.id, 'accept')} className="btn-primary py-2 px-4 text-xs">Accept</button>
+                            <button onClick={() => handleRespondToConnection(connection.id, 'decline')} className="btn-outline py-2 px-4 text-xs">Decline</button>
+                          </div>
+                        </div>
+                      ))}
+                      {incomingConnectionRequests.length === 0 && <p className="text-sm text-muted">No incoming requests.</p>}
+                    </div>
+                  </div>
+                  <div className="card p-6">
+                    <h3 className="font-bold text-lg mb-4">Suggested Connections</h3>
+                    <div className="space-y-4">
+                      {connectionSuggestions.map((suggestion) => (
+                        <div key={suggestion.id} className="border border-border rounded-[15px] p-4 flex items-center justify-between gap-4">
+                          <div>
+                            <p className="font-bold text-sm">{suggestion.username || suggestion.stxAddress}</p>
+                            <p className="text-[10px] text-muted uppercase tracking-widest">{suggestion.specialty || suggestion.role}</p>
+                          </div>
+                          <button onClick={() => handleRequestConnection(suggestion.id)} className="btn-outline py-2 px-4 text-xs">Connect</button>
+                        </div>
+                      ))}
+                      {connectionSuggestions.length === 0 && <p className="text-sm text-muted">No suggestions right now.</p>}
+                    </div>
+                  </div>
+                </div>
+
+                {outgoingConnectionRequests.length > 0 && (
+                  <div className="card p-6">
+                    <h3 className="font-bold text-lg mb-4">Pending Requests</h3>
+                    <div className="space-y-4">
+                      {outgoingConnectionRequests.map((connection) => (
+                        <div key={connection.id} className="border border-border rounded-[15px] p-4 flex items-center justify-between gap-4">
+                          <div>
+                            <p className="font-bold text-sm">{connection.otherUser?.username || connection.otherUser?.stxAddress || 'User'}</p>
+                            <p className="text-[10px] text-muted uppercase tracking-widest">{connection.otherUser?.role || 'User'}</p>
+                          </div>
+                          <span className="text-xs font-bold text-muted">Pending</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

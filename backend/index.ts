@@ -16,6 +16,12 @@ import { reviewRoutes } from "./routes/review.routes";
 import { categoryRoutes } from "./routes/category.routes";
 import { adminRoutes } from "./routes/admin.routes";
 import { notificationRoutes } from "./routes/notification.routes";
+import { settingsRoutes } from "./routes/settings.routes";
+import { connectionsRoutes } from "./routes/connections.routes";
+import { messagesRoutes } from "./routes/messages.routes";
+import { bountyRoutes } from "./routes/bounty.routes";
+import { socialRoutes } from "./routes/social.routes";
+import { nftRoutes } from "./routes/nft.routes";
 
 const app = express();
 
@@ -93,6 +99,12 @@ app.use("/api/reviews", reviewRoutes);
 app.use("/api/categories", categoryRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/settings", settingsRoutes);
+app.use("/api/connections", connectionsRoutes);
+app.use("/api/messages", messagesRoutes);
+app.use("/api/bounties", bountyRoutes);
+app.use("/api/social", socialRoutes);
+app.use("/api/nfts", nftRoutes);
 
 // Error handler
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {

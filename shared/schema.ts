@@ -48,6 +48,30 @@ export const NFT_TYPES = [
   "loyalty",
   "custom",
 ] as const;
+export const MESSAGE_VISIBILITIES = [
+  "everyone",
+  "clients_only",
+  "connections_only",
+] as const;
+export const PROFILE_VISIBILITIES = [
+  "public",
+  "private",
+] as const;
+export const CONNECTION_STATUSES = [
+  "pending",
+  "accepted",
+  "declined",
+] as const;
+export const BOUNTY_STATUSES = [
+  "open",
+  "completed",
+  "cancelled",
+] as const;
+export const BOUNTY_SUBMISSION_STATUSES = [
+  "pending",
+  "approved",
+  "rejected",
+] as const;
 
 // Tables
 
@@ -224,6 +248,123 @@ export const reputationNfts = mysqlTable("reputation_nfts", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const userSettings = mysqlTable("user_settings", {
+  userId: bigint("user_id", { mode: "number", unsigned: true })
+    .references(() => users.id)
+    .primaryKey(),
+  notificationsEnabled: boolean("notifications_enabled").default(true).notNull(),
+  emailNotifications: boolean("email_notifications").default(true).notNull(),
+  messagingOption: mysqlEnum("messaging_option", [...MESSAGE_VISIBILITIES]).default("everyone").notNull(),
+  profileVisibility: mysqlEnum("profile_visibility", [...PROFILE_VISIBILITIES]).default("public").notNull(),
+  email: varchar("email", { length: 255 }),
+  twitterHandle: varchar("twitter_handle", { length: 100 }),
+  isTwitterConnected: boolean("is_twitter_connected").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const conversations = mysqlTable("conversations", {
+  id: bigint("id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const conversationParticipants = mysqlTable("conversation_participants", {
+  id: bigint("id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  conversationId: bigint("conversation_id", { mode: "number", unsigned: true })
+    .references(() => conversations.id)
+    .notNull(),
+  userId: bigint("user_id", { mode: "number", unsigned: true })
+    .references(() => users.id)
+    .notNull(),
+  lastReadAt: timestamp("last_read_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const messages = mysqlTable("messages", {
+  id: bigint("id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  conversationId: bigint("conversation_id", { mode: "number", unsigned: true })
+    .references(() => conversations.id)
+    .notNull(),
+  senderId: bigint("sender_id", { mode: "number", unsigned: true })
+    .references(() => users.id)
+    .notNull(),
+  body: text("body").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const socialPosts = mysqlTable("social_posts", {
+  id: bigint("id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  userId: bigint("user_id", { mode: "number", unsigned: true })
+    .references(() => users.id)
+    .notNull(),
+  content: text("content").notNull(),
+  imageUrl: varchar("image_url", { length: 500 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const postLikes = mysqlTable("post_likes", {
+  id: bigint("id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  postId: bigint("post_id", { mode: "number", unsigned: true })
+    .references(() => socialPosts.id)
+    .notNull(),
+  userId: bigint("user_id", { mode: "number", unsigned: true })
+    .references(() => users.id)
+    .notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const userConnections = mysqlTable("user_connections", {
+  id: bigint("id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  requesterId: bigint("requester_id", { mode: "number", unsigned: true })
+    .references(() => users.id)
+    .notNull(),
+  addresseeId: bigint("addressee_id", { mode: "number", unsigned: true })
+    .references(() => users.id)
+    .notNull(),
+  status: mysqlEnum("status", [...CONNECTION_STATUSES]).default("pending").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const bounties = mysqlTable("bounties", {
+  id: bigint("id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  createdById: bigint("created_by_id", { mode: "number", unsigned: true })
+    .references(() => users.id)
+    .notNull(),
+  title: varchar("title", { length: 200 }).notNull(),
+  description: text("description").notNull(),
+  links: varchar("links", { length: 500 }),
+  reward: varchar("reward", { length: 100 }).notNull(),
+  status: mysqlEnum("status", [...BOUNTY_STATUSES]).default("open").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const bountySubmissions = mysqlTable("bounty_submissions", {
+  id: bigint("id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  bountyId: bigint("bounty_id", { mode: "number", unsigned: true })
+    .references(() => bounties.id)
+    .notNull(),
+  userId: bigint("user_id", { mode: "number", unsigned: true })
+    .references(() => users.id)
+    .notNull(),
+  description: text("description").notNull(),
+  links: varchar("links", { length: 500 }),
+  status: mysqlEnum("status", [...BOUNTY_SUBMISSION_STATUSES]).default("pending").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const platformSettings = mysqlTable("platform_settings", {
+  id: int("id").primaryKey(),
+  daoFeePercentage: decimal("dao_fee_percentage", { precision: 5, scale: 2 }).default("10.00").notNull(),
+  daoWalletAddress: varchar("dao_wallet_address", { length: 255 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // Zod Schemas
 
 export const insertUserSchema = createInsertSchema(users, {
@@ -337,3 +478,13 @@ export type ReputationNft = typeof reputationNfts.$inferSelect;
 export type InsertReputationNft = z.infer<typeof insertReputationNftSchema>;
 export type Notification = typeof notifications.$inferSelect;
 export type InsertNotification = z.infer<typeof insertNotificationSchema>;
+export type UserSetting = typeof userSettings.$inferSelect;
+export type Conversation = typeof conversations.$inferSelect;
+export type ConversationParticipant = typeof conversationParticipants.$inferSelect;
+export type Message = typeof messages.$inferSelect;
+export type SocialPost = typeof socialPosts.$inferSelect;
+export type PostLike = typeof postLikes.$inferSelect;
+export type UserConnection = typeof userConnections.$inferSelect;
+export type Bounty = typeof bounties.$inferSelect;
+export type BountySubmission = typeof bountySubmissions.$inferSelect;
+export type PlatformSetting = typeof platformSettings.$inferSelect;

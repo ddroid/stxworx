@@ -22,6 +22,8 @@ adminRoutes.get("/me", requireAdmin, adminController.me);
 
 // Dashboard
 adminRoutes.get("/dashboard", requireAdmin, adminController.dashboard);
+adminRoutes.get("/config", requireAdmin, adminController.getPlatformConfig);
+adminRoutes.patch("/config", requireAdmin, adminController.updatePlatformConfig);
 
 // Projects
 adminRoutes.get("/projects", requireAdmin, adminController.getAllProjects);

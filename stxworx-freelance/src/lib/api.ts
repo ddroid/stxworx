@@ -164,6 +164,115 @@ export interface AdminDisputeResolutionInput {
   favorFreelancer: boolean;
 }
 
+export interface ApiSettings {
+  userId: number;
+  notificationsEnabled: boolean;
+  emailNotifications: boolean;
+  messagingOption: 'everyone' | 'clients_only' | 'connections_only';
+  profileVisibility: 'public' | 'private';
+  email?: string | null;
+  twitterHandle?: string | null;
+  isTwitterConnected: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ApiConnection {
+  id: number;
+  requesterId: number;
+  addresseeId: number;
+  status: 'pending' | 'accepted' | 'declined';
+  direction: 'incoming' | 'outgoing';
+  otherUser?: Pick<ApiUserProfile, 'id' | 'stxAddress' | 'username' | 'role' | 'isActive' | 'specialty' | 'avatar'> | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ApiConversation {
+  id: number;
+  participant?: Pick<ApiUserProfile, 'id' | 'stxAddress' | 'username' | 'role' | 'avatar'> | null;
+  lastMessage: string;
+  lastMessageAt?: string;
+  unreadCount: number;
+}
+
+export interface ApiConversationMessage {
+  id: number;
+  conversationId: number;
+  senderId: number;
+  body: string;
+  createdAt?: string;
+  senderAddress?: string;
+  senderUsername?: string | null;
+  senderRole?: UserRole;
+}
+
+export interface ApiBounty {
+  id: number;
+  createdById: number;
+  title: string;
+  description: string;
+  links?: string | null;
+  reward: string;
+  status: 'open' | 'completed' | 'cancelled';
+  creatorAddress?: string;
+  creatorUsername?: string | null;
+  submissionCount: number;
+  hasParticipated: boolean;
+  mySubmissionStatus?: 'pending' | 'approved' | 'rejected' | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ApiBountyParticipation {
+  id: number;
+  bountyId: number;
+  description: string;
+  links?: string | null;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt?: string;
+  bountyTitle?: string | null;
+  reward?: string | null;
+}
+
+export interface ApiBountyDashboard {
+  posted: ApiBounty[];
+  participations: ApiBountyParticipation[];
+}
+
+export interface ApiSocialPost {
+  id: number;
+  userId: number;
+  content: string;
+  imageUrl?: string | null;
+  likesCount: number;
+  commentsCount: number;
+  likedByViewer: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ApiReputationNft {
+  id: number;
+  recipientId: number;
+  nftType: 'milestone_streak' | 'top_freelancer' | 'top_client' | 'loyalty' | 'custom';
+  name: string;
+  description?: string | null;
+  metadataUrl?: string | null;
+  mintTxId?: string | null;
+  minted: boolean;
+  issuedBy: number;
+  createdAt?: string;
+}
+
+export interface ApiPlatformConfig {
+  id: number;
+  daoFeePercentage: string;
+  daoWalletAddress?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 function buildUrl(path: string, searchParams?: RequestOptions['searchParams']) {
   const base = `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
   if (!searchParams) {
@@ -512,6 +621,107 @@ export async function clearNotifications() {
   return apiRequest<{ message: string }>('/notifications', { method: 'DELETE' });
 }
 
+export async function getSettings() {
+  return apiRequest<ApiSettings>('/settings/me', { method: 'GET' });
+}
+
+export async function updateSettings(input: Partial<ApiSettings>) {
+  return apiRequest<ApiSettings>('/settings/me', {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function getConnections() {
+  return apiRequest<ApiConnection[]>('/connections', { method: 'GET' });
+}
+
+export async function getConnectionSuggestions() {
+  return apiRequest<Array<Pick<ApiUserProfile, 'id' | 'stxAddress' | 'username' | 'role' | 'isActive' | 'specialty' | 'avatar'>>>('/connections/suggestions', { method: 'GET' });
+}
+
+export async function requestConnection(userId: number) {
+  return apiRequest<ApiConnection>('/connections/request', {
+    method: 'POST',
+    body: JSON.stringify({ userId }),
+  });
+}
+
+export async function acceptConnection(connectionId: number) {
+  return apiRequest<ApiConnection>(`/connections/${connectionId}/accept`, { method: 'PATCH' });
+}
+
+export async function declineConnection(connectionId: number) {
+  return apiRequest<ApiConnection>(`/connections/${connectionId}/decline`, { method: 'PATCH' });
+}
+
+export async function getConversations() {
+  return apiRequest<ApiConversation[]>('/messages/conversations', { method: 'GET' });
+}
+
+export async function startConversation(participantId: number, message?: string) {
+  return apiRequest<{ id: number }>(`/messages/conversations`, {
+    method: 'POST',
+    body: JSON.stringify({ participantId, message }),
+  });
+}
+
+export async function getConversationMessages(conversationId: number) {
+  return apiRequest<ApiConversationMessage[]>(`/messages/conversations/${conversationId}/messages`, { method: 'GET' });
+}
+
+export async function sendConversationMessage(conversationId: number, body: string) {
+  return apiRequest<ApiConversationMessage>(`/messages/conversations/${conversationId}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({ body }),
+  });
+}
+
+export async function getBounties() {
+  return apiRequest<ApiBounty[]>('/bounties', { method: 'GET' });
+}
+
+export async function getMyBountyDashboard() {
+  return apiRequest<ApiBountyDashboard>('/bounties/my/dashboard', { method: 'GET' });
+}
+
+export async function createBounty(input: { title: string; description: string; links?: string; reward: string }) {
+  return apiRequest<ApiBounty>('/bounties', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function participateInBounty(bountyId: number, input: { description: string; links?: string }) {
+  return apiRequest<ApiBountyParticipation>(`/bounties/${bountyId}/participate`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function getSocialPosts(address: string) {
+  return apiRequest<ApiSocialPost[]>(`/social/${address}/posts`, { method: 'GET' });
+}
+
+export async function createSocialPost(input: { content: string; imageUrl?: string }) {
+  return apiRequest<ApiSocialPost>('/social/posts', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function toggleSocialPostLike(postId: number) {
+  return apiRequest<{ likesCount: number; likedByViewer: boolean }>(`/social/posts/${postId}/like`, { method: 'PATCH' });
+}
+
+export async function getMyNfts() {
+  return apiRequest<ApiReputationNft[]>('/nfts/me', { method: 'GET' });
+}
+
+export async function getUserNfts(address: string) {
+  return apiRequest<ApiReputationNft[]>(`/nfts/user/${address}`, { method: 'GET' });
+}
+
 export async function adminLogin(input: { username: string; password: string }) {
   return apiRequest<AdminAuthResponse>('/admin/login', {
     method: 'POST',
@@ -529,6 +739,17 @@ export async function getAdminMe() {
 
 export async function getAdminDashboard() {
   return apiRequest<ApiAdminDashboard>('/admin/dashboard', { method: 'GET' });
+}
+
+export async function getAdminPlatformConfig() {
+  return apiRequest<ApiPlatformConfig>('/admin/config', { method: 'GET' });
+}
+
+export async function updateAdminPlatformConfig(input: { daoFeePercentage?: string; daoWalletAddress?: string }) {
+  return apiRequest<ApiPlatformConfig>('/admin/config', {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
 }
 
 export async function getAdminUsers() {

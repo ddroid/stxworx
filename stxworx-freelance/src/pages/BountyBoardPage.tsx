@@ -1,44 +1,89 @@
-
-import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'motion/react';
-import { 
-  Search, Bell, Globe, LayoutGrid, Users, BookOpen, Briefcase, Calendar, ShoppingBag, Newspaper,
-  ChevronRight, Star, Plus, Heart, MessageSquare, Share2, MapPin, Link as LinkIcon, Twitter, Instagram,
-  Facebook, MoreHorizontal, ArrowRight, Filter, CheckCircle2, Trophy, ChevronLeft, ChevronsRight, ChevronDown,
-  Wallet, Send, X, Settings, ShieldCheck, LogOut, Mail, Phone, MessageCircle, Sun, Moon, Maximize2, Minimize2,
-  HelpCircle, AlertTriangle, Folder, GraduationCap, Home, PenTool, Camera, Edit2, Share, Shield, Upload, FileText,
-  Download, Sparkles, Bot, ZoomIn, ZoomOut
-} from 'lucide-react';
-import { GoogleGenAI } from '@google/genai';
-import * as Shared from '../shared';
+import React, { useCallback, useEffect, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
+import { Link as LinkIcon, X } from 'lucide-react';
+import {
+  createBounty,
+  getBounties,
+  getMyBountyDashboard,
+  participateInBounty,
+  type ApiBounty,
+  type ApiBountyDashboard,
+} from '../lib/api';
 
 export const BountiesPage = () => {
-  const [bounties, setBounties] = useState([
-    { id: 1, title: 'Write a tutorial on Clarity', description: 'Create a comprehensive guide on writing secure Clarity smart contracts.', links: 'https://docs.stacks.co', reward: '500 STX' },
-    { id: 2, title: 'Design a new logo', description: 'We need a fresh, modern logo for our new DeFi protocol.', links: 'https://example.com/design-brief', reward: '200 USDCx' }
-  ]);
+  const [bounties, setBounties] = useState<ApiBounty[]>([]);
+  const [dashboard, setDashboard] = useState<ApiBountyDashboard | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newBounty, setNewBounty] = useState({ title: '', description: '', links: '', reward: '' });
-
   const [isParticipateModalOpen, setIsParticipateModalOpen] = useState(false);
   const [selectedBountyId, setSelectedBountyId] = useState<number | null>(null);
   const [participateForm, setParticipateForm] = useState({ description: '', links: '' });
+  const [loading, setLoading] = useState(true);
+  const [posting, setPosting] = useState(false);
+  const [submittingParticipation, setSubmittingParticipation] = useState(false);
 
-  const handlePostBounty = () => {
-    if (newBounty.title && newBounty.description) {
-      setBounties([{ id: Date.now(), ...newBounty }, ...bounties]);
+  const loadBounties = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [bountyList, bountyDashboard] = await Promise.all([
+        getBounties(),
+        getMyBountyDashboard().catch(() => null),
+      ]);
+      setBounties(bountyList);
+      setDashboard(bountyDashboard);
+    } catch (error) {
+      console.error('Failed to load bounties:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadBounties();
+  }, [loadBounties]);
+
+  const handlePostBounty = async () => {
+    if (!newBounty.title.trim() || !newBounty.description.trim() || !newBounty.reward.trim()) {
+      return;
+    }
+
+    setPosting(true);
+    try {
+      await createBounty({
+        title: newBounty.title.trim(),
+        description: newBounty.description.trim(),
+        links: newBounty.links.trim() || undefined,
+        reward: newBounty.reward.trim(),
+      });
       setIsModalOpen(false);
       setNewBounty({ title: '', description: '', links: '', reward: '' });
+      await loadBounties();
+    } catch (error) {
+      console.error('Failed to create bounty:', error);
+    } finally {
+      setPosting(false);
     }
   };
 
-  const handleParticipateSubmit = () => {
-    if (participateForm.description) {
-      alert('Participation submitted successfully!');
+  const handleParticipateSubmit = async () => {
+    if (!selectedBountyId || !participateForm.description.trim()) {
+      return;
+    }
+
+    setSubmittingParticipation(true);
+    try {
+      await participateInBounty(selectedBountyId, {
+        description: participateForm.description.trim(),
+        links: participateForm.links.trim() || undefined,
+      });
       setIsParticipateModalOpen(false);
       setParticipateForm({ description: '', links: '' });
       setSelectedBountyId(null);
+      await loadBounties();
+    } catch (error) {
+      console.error('Failed to submit bounty participation:', error);
+    } finally {
+      setSubmittingParticipation(false);
     }
   };
 
@@ -52,34 +97,67 @@ export const BountiesPage = () => {
           </div>
           <button onClick={() => setIsModalOpen(true)} className="btn-primary">Post Bounty</button>
         </div>
+
+        {dashboard && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div className="card p-5">
+              <p className="text-[10px] font-bold text-muted uppercase tracking-widest mb-2">Posted by you</p>
+              <p className="text-3xl font-black">{dashboard.posted.length}</p>
+            </div>
+            <div className="card p-5">
+              <p className="text-[10px] font-bold text-muted uppercase tracking-widest mb-2">Your participations</p>
+              <p className="text-3xl font-black">{dashboard.participations.length}</p>
+            </div>
+            <div className="card p-5">
+              <p className="text-[10px] font-bold text-muted uppercase tracking-widest mb-2">Approved participations</p>
+              <p className="text-3xl font-black">{dashboard.participations.filter((entry) => entry.status === 'approved').length}</p>
+            </div>
+          </div>
+        )}
         
         <div className="grid grid-cols-1 gap-6">
-          {bounties.map(bounty => (
-            <div key={bounty.id} className="card p-6 flex flex-col md:flex-row justify-between items-start gap-6 hover:border-accent-orange transition-colors">
-              <div className="flex-1">
-                <h3 className="text-xl font-black mb-2">{bounty.title}</h3>
-                <p className="text-sm text-muted mb-4">{bounty.description}</p>
-                {bounty.links && (
-                  <a href={bounty.links} target="_blank" rel="noopener noreferrer" className="text-xs text-accent-cyan hover:underline flex items-center gap-1">
-                    <LinkIcon size={12} /> {bounty.links}
-                  </a>
-                )}
+          {loading ? (
+            <div className="card p-6 text-sm text-muted">Loading bounties...</div>
+          ) : (
+            bounties.map((bounty) => (
+              <div key={bounty.id} className="card p-6 flex flex-col md:flex-row justify-between items-start gap-6 hover:border-accent-orange transition-colors">
+                <div className="flex-1">
+                  <div className="flex items-center gap-3 mb-2">
+                    <h3 className="text-xl font-black">{bounty.title}</h3>
+                    <span className="px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest bg-accent-orange/10 text-accent-orange">
+                      {bounty.status}
+                    </span>
+                  </div>
+                  <p className="text-sm text-muted mb-4">{bounty.description}</p>
+                  {bounty.links && (
+                    <a href={bounty.links} target="_blank" rel="noopener noreferrer" className="text-xs text-accent-cyan hover:underline flex items-center gap-1 mb-3">
+                      <LinkIcon size={12} /> {bounty.links}
+                    </a>
+                  )}
+                  <p className="text-[10px] text-muted font-bold uppercase tracking-widest">
+                    {bounty.submissionCount} submissions
+                  </p>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="text-2xl font-black text-accent-orange mb-1">{bounty.reward}</p>
+                  <p className="text-[10px] text-muted font-bold uppercase tracking-widest mb-4">Reward</p>
+                  <button
+                    onClick={() => {
+                      setSelectedBountyId(bounty.id);
+                      setIsParticipateModalOpen(true);
+                    }}
+                    disabled={bounty.hasParticipated || bounty.status !== 'open'}
+                    className="btn-outline py-2 px-6 text-xs disabled:opacity-50"
+                  >
+                    {bounty.hasParticipated ? (bounty.mySubmissionStatus || 'Participated') : 'Participate'}
+                  </button>
+                </div>
               </div>
-              <div className="text-right shrink-0">
-                <p className="text-2xl font-black text-accent-orange mb-1">{bounty.reward}</p>
-                <p className="text-[10px] text-muted font-bold uppercase tracking-widest mb-4">Reward</p>
-                <button 
-                  onClick={() => {
-                    setSelectedBountyId(bounty.id);
-                    setIsParticipateModalOpen(true);
-                  }}
-                  className="btn-outline py-2 px-6 text-xs"
-                >
-                  Participate
-                </button>
-              </div>
-            </div>
-          ))}
+            ))
+          )}
+          {!loading && bounties.length === 0 && (
+            <div className="card p-6 text-sm text-muted">No bounties available yet.</div>
+          )}
         </div>
 
         <AnimatePresence>
@@ -99,44 +177,46 @@ export const BountiesPage = () => {
                 <div className="space-y-4">
                   <div>
                     <label className="block text-xs font-bold uppercase tracking-widest text-muted mb-2">Title</label>
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       value={newBounty.title}
-                      onChange={(e) => setNewBounty({...newBounty, title: e.target.value})}
+                      onChange={(e) => setNewBounty({ ...newBounty, title: e.target.value })}
                       className="w-full bg-ink/5 border border-border rounded-[15px] px-4 py-3 text-sm focus:ring-1 focus:ring-accent-orange outline-none"
                       placeholder="e.g. Write a tutorial on Clarity"
                     />
                   </div>
                   <div>
                     <label className="block text-xs font-bold uppercase tracking-widest text-muted mb-2">Description</label>
-                    <textarea 
+                    <textarea
                       value={newBounty.description}
-                      onChange={(e) => setNewBounty({...newBounty, description: e.target.value})}
+                      onChange={(e) => setNewBounty({ ...newBounty, description: e.target.value })}
                       className="w-full bg-ink/5 border border-border rounded-[15px] px-4 py-3 text-sm focus:ring-1 focus:ring-accent-orange outline-none h-24 resize-none"
                       placeholder="Describe the bounty requirements..."
                     />
                   </div>
                   <div>
                     <label className="block text-xs font-bold uppercase tracking-widest text-muted mb-2">Links (Optional)</label>
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       value={newBounty.links}
-                      onChange={(e) => setNewBounty({...newBounty, links: e.target.value})}
+                      onChange={(e) => setNewBounty({ ...newBounty, links: e.target.value })}
                       className="w-full bg-ink/5 border border-border rounded-[15px] px-4 py-3 text-sm focus:ring-1 focus:ring-accent-orange outline-none"
                       placeholder="https://..."
                     />
                   </div>
                   <div>
                     <label className="block text-xs font-bold uppercase tracking-widest text-muted mb-2">Reward Amount</label>
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       value={newBounty.reward}
-                      onChange={(e) => setNewBounty({...newBounty, reward: e.target.value})}
+                      onChange={(e) => setNewBounty({ ...newBounty, reward: e.target.value })}
                       className="w-full bg-ink/5 border border-border rounded-[15px] px-4 py-3 text-sm focus:ring-1 focus:ring-accent-orange outline-none"
                       placeholder="e.g. 500 STX"
                     />
                   </div>
-                  <button onClick={handlePostBounty} className="btn-primary w-full py-4 mt-4">Post Bounty</button>
+                  <button onClick={handlePostBounty} disabled={posting} className="btn-primary w-full py-4 mt-4 disabled:opacity-50">
+                    {posting ? 'Posting...' : 'Post Bounty'}
+                  </button>
                 </div>
               </motion.div>
             </div>
@@ -158,24 +238,26 @@ export const BountiesPage = () => {
                 <div className="space-y-4">
                   <div>
                     <label className="block text-xs font-bold uppercase tracking-widest text-muted mb-2">Description</label>
-                    <textarea 
+                    <textarea
                       value={participateForm.description}
-                      onChange={(e) => setParticipateForm({...participateForm, description: e.target.value})}
+                      onChange={(e) => setParticipateForm({ ...participateForm, description: e.target.value })}
                       className="w-full bg-ink/5 border border-border rounded-[15px] px-4 py-3 text-sm focus:ring-1 focus:ring-accent-orange outline-none h-32 resize-none"
                       placeholder="Describe how you plan to complete this bounty or what you have done..."
                     />
                   </div>
                   <div>
                     <label className="block text-xs font-bold uppercase tracking-widest text-muted mb-2">Links (Proof of work / Portfolio)</label>
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       value={participateForm.links}
-                      onChange={(e) => setParticipateForm({...participateForm, links: e.target.value})}
+                      onChange={(e) => setParticipateForm({ ...participateForm, links: e.target.value })}
                       className="w-full bg-ink/5 border border-border rounded-[15px] px-4 py-3 text-sm focus:ring-1 focus:ring-accent-orange outline-none"
                       placeholder="https://..."
                     />
                   </div>
-                  <button onClick={handleParticipateSubmit} className="btn-primary w-full py-4 mt-4">Submit Participation</button>
+                  <button onClick={handleParticipateSubmit} disabled={submittingParticipation} className="btn-primary w-full py-4 mt-4 disabled:opacity-50">
+                    {submittingParticipation ? 'Submitting...' : 'Submit Participation'}
+                  </button>
                 </div>
               </motion.div>
             </div>

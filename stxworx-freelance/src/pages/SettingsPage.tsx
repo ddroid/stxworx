@@ -1,35 +1,77 @@
-
-import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'motion/react';
-import { 
-  Search, Bell, Globe, LayoutGrid, Users, BookOpen, Briefcase, Calendar, ShoppingBag, Newspaper,
-  ChevronRight, Star, Plus, Heart, MessageSquare, Share2, MapPin, Link as LinkIcon, Twitter, Instagram,
-  Facebook, MoreHorizontal, ArrowRight, Filter, CheckCircle2, Trophy, ChevronLeft, ChevronsRight, ChevronDown,
-  Wallet, Send, X, Settings, ShieldCheck, LogOut, Mail, Phone, MessageCircle, Sun, Moon, Maximize2, Minimize2,
-  HelpCircle, AlertTriangle, Folder, GraduationCap, Home, PenTool, Camera, Edit2, Share, Shield, Upload, FileText,
-  Download, Sparkles, Bot, ZoomIn, ZoomOut
-} from 'lucide-react';
-import { GoogleGenAI } from '@google/genai';
-import * as Shared from '../shared';
+import React, { useEffect, useState } from 'react';
+import { Link as LinkIcon, Mail, Shield, Twitter } from 'lucide-react';
+import { getSettings, updateSettings } from '../lib/api';
 
 export const SettingsPage = () => {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [emailNotifications, setEmailNotifications] = useState(true);
-  const [messagingOption, setMessagingOption] = useState('everyone');
-  const [profileVisibility, setProfileVisibility] = useState('public');
+  const [messagingOption, setMessagingOption] = useState<'everyone' | 'clients_only' | 'connections_only'>('everyone');
+  const [profileVisibility, setProfileVisibility] = useState<'public' | 'private'>('public');
   const [email, setEmail] = useState('');
   const [twitterHandle, setTwitterHandle] = useState('');
   const [isTwitterConnected, setIsTwitterConnected] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const loadSettings = async () => {
+      setLoading(true);
+      try {
+        const settings = await getSettings();
+        setNotificationsEnabled(settings.notificationsEnabled);
+        setEmailNotifications(settings.emailNotifications);
+        setMessagingOption(settings.messagingOption);
+        setProfileVisibility(settings.profileVisibility);
+        setEmail(settings.email || '');
+        setTwitterHandle(settings.twitterHandle || '');
+        setIsTwitterConnected(settings.isTwitterConnected);
+      } catch (error) {
+        console.error('Failed to load settings:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadSettings();
+  }, []);
 
   const handleTwitterConnect = () => {
-    // Simulate OAuth flow
     if (!isTwitterConnected) {
       setIsTwitterConnected(true);
-      setTwitterHandle('@johndoe');
-    } else {
-      setIsTwitterConnected(false);
-      setTwitterHandle('');
+      if (!twitterHandle) {
+        setTwitterHandle('@stxworx');
+      }
+      return;
+    }
+
+    setIsTwitterConnected(false);
+    setTwitterHandle('');
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const updated = await updateSettings({
+        notificationsEnabled,
+        emailNotifications,
+        messagingOption,
+        profileVisibility,
+        email,
+        twitterHandle,
+        isTwitterConnected,
+      });
+
+      setNotificationsEnabled(updated.notificationsEnabled);
+      setEmailNotifications(updated.emailNotifications);
+      setMessagingOption(updated.messagingOption);
+      setProfileVisibility(updated.profileVisibility);
+      setEmail(updated.email || '');
+      setTwitterHandle(updated.twitterHandle || '');
+      setIsTwitterConnected(updated.isTwitterConnected);
+    } catch (error) {
+      console.error('Failed to save settings:', error);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -52,6 +94,10 @@ export const SettingsPage = () => {
 
           {/* Settings Content */}
           <div className="col-span-1 md:col-span-2 space-y-8">
+            {loading ? (
+              <div className="card p-6 text-sm text-muted">Loading settings...</div>
+            ) : (
+              <>
             
             {/* Connections */}
             <section className="card p-6 space-y-6">
@@ -176,7 +222,7 @@ export const SettingsPage = () => {
                 <div className="space-y-3">
                   <label className="block text-xs font-bold uppercase tracking-widest text-muted">Who can message me</label>
                   <div className="space-y-2">
-                    {['everyone', 'clients_only', 'connections_only'].map((option) => (
+                    {(['everyone', 'clients_only', 'connections_only'] as const).map((option) => (
                       <label key={option} className="flex items-center gap-3 p-3 border border-border rounded-[15px] cursor-pointer hover:bg-ink/5 transition-colors">
                         <div className={`w-5 h-5 rounded-full border flex items-center justify-center ${messagingOption === option ? 'border-accent-pink' : 'border-muted'}`}>
                           {messagingOption === option && <div className="w-3 h-3 rounded-full bg-accent-pink" />}
@@ -187,7 +233,7 @@ export const SettingsPage = () => {
                           name="messaging" 
                           value={option} 
                           checked={messagingOption === option}
-                          onChange={(e) => setMessagingOption(e.target.value)}
+                          onChange={() => setMessagingOption(option)}
                           className="hidden"
                         />
                       </label>
@@ -198,9 +244,21 @@ export const SettingsPage = () => {
             </section>
 
             <div className="flex justify-end gap-4 pt-4">
-              <button className="px-6 py-3 rounded-[15px] font-bold text-muted hover:text-ink transition-colors">Cancel</button>
-              <button className="btn-primary px-8 py-3">Save Changes</button>
+              <button
+                onClick={() => {
+                  setEmail('');
+                  setTwitterHandle('');
+                }}
+                className="px-6 py-3 rounded-[15px] font-bold text-muted hover:text-ink transition-colors"
+              >
+                Cancel
+              </button>
+              <button onClick={handleSave} disabled={saving} className="btn-primary px-8 py-3 disabled:opacity-50">
+                {saving ? 'Saving...' : 'Save Changes'}
+              </button>
             </div>
+              </>
+            )}
 
           </div>
         </div>

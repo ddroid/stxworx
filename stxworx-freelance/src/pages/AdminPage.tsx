@@ -10,13 +10,16 @@ import {
   getAdminDashboard,
   getAdminDisputes,
   getAdminMe,
+  getAdminPlatformConfig,
   getAdminUsers,
   resolveAdminDispute,
   resetAdminDispute,
+  updateAdminPlatformConfig,
   updateAdminUserStatus,
   type ApiAdmin,
   type ApiAdminDashboard,
   type ApiDispute,
+  type ApiPlatformConfig,
 } from '../lib/api';
 import type { ApiUserProfile } from '../types/user';
 
@@ -36,22 +39,29 @@ export const AdminDashboard = () => {
   const [dashboard, setDashboard] = useState<ApiAdminDashboard | null>(null);
   const [users, setUsers] = useState<ApiUserProfile[]>([]);
   const [disputes, setDisputes] = useState<ApiDispute[]>([]);
+  const [platformConfig, setPlatformConfig] = useState<ApiPlatformConfig | null>(null);
+  const [daoFeePercentage, setDaoFeePercentage] = useState('');
+  const [daoWalletAddress, setDaoWalletAddress] = useState('');
   const [resolutionDrafts, setResolutionDrafts] = useState<Record<number, ResolutionDraft>>({});
 
   const loadAdminData = useCallback(async () => {
     setLoading(true);
     try {
-      const [{ admin: currentAdmin }, dashboardResponse, userResponse, disputeResponse] = await Promise.all([
+      const [{ admin: currentAdmin }, dashboardResponse, userResponse, disputeResponse, configResponse] = await Promise.all([
         getAdminMe(),
         getAdminDashboard(),
         getAdminUsers(),
         getAdminDisputes(),
+        getAdminPlatformConfig(),
       ]);
 
       setAdmin(currentAdmin);
       setDashboard(dashboardResponse);
       setUsers(userResponse);
       setDisputes(disputeResponse);
+      setPlatformConfig(configResponse);
+      setDaoFeePercentage(configResponse.daoFeePercentage || '');
+      setDaoWalletAddress(configResponse.daoWalletAddress || '');
       setResolutionDrafts(
         Object.fromEntries(
           disputeResponse.map((dispute) => [
@@ -146,6 +156,20 @@ export const AdminDashboard = () => {
       setDisputes((current) => current.map((entry) => (entry.id === updated.id ? updated : entry)));
     } catch (error) {
       console.error('Failed to update dispute:', error);
+    }
+  };
+
+  const handleSavePlatformConfig = async () => {
+    try {
+      const updated = await updateAdminPlatformConfig({
+        daoFeePercentage: daoFeePercentage.trim(),
+        daoWalletAddress: daoWalletAddress.trim(),
+      });
+      setPlatformConfig(updated);
+      setDaoFeePercentage(updated.daoFeePercentage || '');
+      setDaoWalletAddress(updated.daoWalletAddress || '');
+    } catch (error) {
+      console.error('Failed to update platform config:', error);
     }
   };
 
@@ -282,6 +306,41 @@ export const AdminDashboard = () => {
               ))}
               {users.length === 0 && <p className="text-sm text-muted">No users found.</p>}
             </div>
+          </div>
+        </div>
+
+        <div className="card mb-8">
+          <div className="flex items-center justify-between mb-8">
+            <h3 className="font-bold">DAO Configuration</h3>
+            <span className="text-xs text-muted bg-ink/5 px-3 py-1 rounded-full font-bold">Live config</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-muted">DAO Fee Percentage</label>
+              <input
+                value={daoFeePercentage}
+                onChange={(event) => setDaoFeePercentage(event.target.value)}
+                className="w-full bg-ink/5 border border-border rounded-[15px] px-4 py-3 text-sm outline-none"
+                placeholder="10.00"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-muted">DAO Wallet Address</label>
+              <input
+                value={daoWalletAddress}
+                onChange={(event) => setDaoWalletAddress(event.target.value)}
+                className="w-full bg-ink/5 border border-border rounded-[15px] px-4 py-3 text-sm outline-none"
+                placeholder="SP..."
+              />
+            </div>
+          </div>
+          <div className="flex items-center justify-between mt-6">
+            <p className="text-xs text-muted">
+              Last updated {platformConfig?.updatedAt ? formatRelativeTime(platformConfig.updatedAt) : 'just now'}
+            </p>
+            <button onClick={handleSavePlatformConfig} className="btn-primary py-3 px-5 text-xs">
+              Save DAO Config
+            </button>
           </div>
         </div>
 

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { adminAuthService } from "../services/admin-auth.service";
 import { adminService } from "../services/admin.service";
 import { getAdminCookieName } from "../middleware/admin-auth";
+import { platformSettingsService } from "../services/platform-settings.service";
 
 const loginSchema = z.object({
   username: z.string().min(1),
@@ -36,6 +37,11 @@ const createNftSchema = z.object({
 
 const confirmMintSchema = z.object({
   mintTxId: z.string().min(1),
+});
+
+const updatePlatformConfigSchema = z.object({
+  daoFeePercentage: z.string().optional(),
+  daoWalletAddress: z.string().max(255).optional().or(z.literal("")),
 });
 
 export const adminController = {
@@ -98,6 +104,34 @@ export const adminController = {
       return res.status(200).json(data);
     } catch (error) {
       console.error("Dashboard error:", error);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  },
+
+  async getPlatformConfig(_req: Request, res: Response) {
+    try {
+      const config = await platformSettingsService.get();
+      return res.status(200).json(config);
+    } catch (error) {
+      console.error("Get platform config error:", error);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  },
+
+  async updatePlatformConfig(req: Request, res: Response) {
+    try {
+      const result = updatePlatformConfigSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ message: "Validation error", errors: result.error.errors });
+      }
+
+      const updated = await platformSettingsService.update({
+        daoFeePercentage: result.data.daoFeePercentage,
+        daoWalletAddress: result.data.daoWalletAddress || null,
+      });
+      return res.status(200).json(updated);
+    } catch (error) {
+      console.error("Update platform config error:", error);
       return res.status(500).json({ message: "Internal server error" });
     }
   },
