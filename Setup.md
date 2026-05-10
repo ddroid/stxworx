@@ -1,4 +1,4 @@
-# STXWorx Freelance Platform - Setup Guide
+# STXWorx Freelance Platform - Setup Guide 
 
 Complete step-by-step guide to set up the STXWorx freelance platform locally for development.
 
